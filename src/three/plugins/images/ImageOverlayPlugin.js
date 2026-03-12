@@ -13,6 +13,7 @@ import { GeoJSONImageSource } from './sources/GeoJSONImageSource.js';
 import { WMSImageSource } from './sources/WMSImageSource.js';
 import { TiledRegionImageSource } from './sources/RegionImageSource.js';
 import { TiledTextureComposer } from './overlays/TiledTextureComposer.js';
+import { UrlTemplateImageSource } from './sources/UrlTemplateImageSource.js';
 
 const _matrix = /* @__PURE__ */ new Matrix4();
 const _vec = /* @__PURE__ */ new Vector3();
@@ -1647,6 +1648,17 @@ export class WMTSTilesOverlay extends TiledImageOverlay {
 
 		super( options );
 		this.imageSource = new WMTSImageSource( options );
+
+	}
+
+}
+
+export class UrlTemplateTilesOverlay extends TiledImageOverlay {
+
+	constructor( options = {} ) {
+
+		super( options );
+		this.imageSource = new UrlTemplateImageSource( options );
 
 	}
 

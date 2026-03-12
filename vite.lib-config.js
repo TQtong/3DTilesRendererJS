@@ -1,22 +1,26 @@
 import { loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { packageAliases } from './vite.config.js';
+
+const __dirname = path.dirname( fileURLToPath( import.meta.url ) );
 
 export default ( { mode } ) => {
 
 	process.env = { ...process.env, ...loadEnv( mode, process.cwd() ) };
 
 	const entry = {
-		'index': './src/index.js',
-		'index.plugins': './src/plugins.js',
+		'index': path.resolve( __dirname, 'src/index.js' ),
+		'index.plugins': path.resolve( __dirname, 'src/plugins.js' ),
 
-		'index.core': './src/core/renderer/index.js',
-		'index.three': './src/three/renderer/index.js',
-		'index.babylonjs': './src/babylonjs/renderer/index.js',
-		'index.r3f': './src/r3f/index.jsx',
+		'index.core': path.resolve( __dirname, 'src/core/renderer/index.js' ),
+		'index.three': path.resolve( __dirname, 'src/three/renderer/index.js' ),
+		'index.babylonjs': path.resolve( __dirname, 'src/babylonjs/renderer/index.js' ),
+		'index.r3f': path.resolve( __dirname, 'src/r3f/index.jsx' ),
 
-		'index.core-plugins': './src/core/plugins/index.js',
-		'index.three-plugins': './src/three/plugins/index.js'
+		'index.core-plugins': path.resolve( __dirname, 'src/core/plugins/index.js' ),
+		'index.three-plugins': path.resolve( __dirname, 'src/three/plugins/index.js' )
 	};
 
 	return {
@@ -31,9 +35,21 @@ export default ( { mode } ) => {
 			outDir: './build/',
 			minify: true,
 			rollupOptions: {
-				external: ( p ) => {
+				external: ( id ) => {
 
-					return ! /^[./\\]/.test( p ) && ! /^3d-tiles-renderer/.test( p );
+					if ( /^[./\\]/.test( id ) || /^3d-tiles-renderer/.test( id ) ) {
+
+						return false;
+
+					}
+
+					if ( path.isAbsolute( id ) ) {
+
+						return false;
+
+					}
+
+					return true;
 
 				},
 			},

@@ -6,6 +6,7 @@ import { XYZImageSource } from './sources/XYZImageSource.js';
 import { TMSImageSource } from './sources/TMSImageSource.js';
 import { WMTSImageSource } from './sources/WMTSImageSource.js';
 import { WMSImageSource } from './sources/WMSImageSource.js';
+import { UrlTemplateImageSource } from './sources/UrlTemplateImageSource.js';
 
 // https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames
 export class XYZTilesPlugin extends EllipsoidProjectionTilesPlugin {
@@ -102,6 +103,38 @@ export class WMSTilesPlugin extends EllipsoidProjectionTilesPlugin {
 			tileDimension,
 			styles,
 			version
+		} );
+
+	}
+
+}
+
+export class UrlTemplateTilesPlugin extends EllipsoidProjectionTilesPlugin {
+
+	constructor( options = {} ) {
+
+		const {
+			url,
+			subdomains,
+			levels,
+			tileDimension,
+			projection,
+			contentBoundingBox,
+			customTags,
+			...rest
+		} = options;
+
+		super( rest );
+
+		this.name = 'URL_TEMPLATE_TILES_PLUGIN';
+		this.imageSource = new UrlTemplateImageSource( {
+			url,
+			subdomains,
+			levels,
+			tileDimension,
+			projection,
+			contentBoundingBox,
+			customTags,
 		} );
 
 	}
