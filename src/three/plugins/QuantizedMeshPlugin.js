@@ -451,21 +451,22 @@ export class QuantizedMeshPlugin {
 
 		}
 
-		// Remove virtual children when the parent is disposed since they depend on the parent's
+		// Remove all children when the parent is disposed since they depend on the parent's
 		// loaded scene for clipping and cannot be rendered or re-generated without it. They will
-		// be re-created once the parent is loaded again.
+		// be re-created by expandChildren once the parent is reloaded. All children (both real
+		// and virtual) must be removed to prevent stale preprocessed children from causing
+		// ensureChildrenArePreprocessed to skip newly appended children on reload.
 		if ( TILE_AVAILABLE in tile ) {
 
-			const { virtualChildCount } = tile.internal;
-			const len = tile.children.length;
-			const start = len - virtualChildCount;
-			for ( let i = start; i < len; i ++ ) {
+			for ( let i = tile.children.length - 1; i >= 0; i -- ) {
 
-				tiles.processNodeQueue.remove( tile.children[ i ] );
+				const child = tile.children[ i ];
+				tiles.processNodeQueue.remove( child );
+				tiles.lruCache.remove( child );
 
 			}
 
-			tile.children.length -= virtualChildCount;
+			tile.children.length = 0;
 			tile.internal.virtualChildCount = 0;
 
 		}

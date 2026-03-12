@@ -988,7 +988,7 @@ export class TilesRendererBase {
 	ensureChildrenArePreprocessed( tile, forceImmediate = this.stats.tilesProcessed < this.maxTilesProcessed ) {
 
 		const children = tile.children;
-		if ( children.length === 0 || children[ 0 ].traversal ) {
+		if ( children.length === 0 || ( children[ 0 ].traversal && children[ children.length - 1 ].traversal ) ) {
 
 			return;
 
