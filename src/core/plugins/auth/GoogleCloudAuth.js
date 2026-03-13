@@ -1,4 +1,4 @@
-import { TraversalUtils } from '3d-tiles-renderer/core';
+import { TraversalUtils } from 'um-3d-tiles-renderer/core';
 
 const TILES_MAP_URL = 'https://tile.googleapis.com/v1/createSession';
 

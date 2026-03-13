@@ -1,4 +1,4 @@
-import { PNTSLoaderBase } from '3d-tiles-renderer/core';
+import { PNTSLoaderBase } from 'um-3d-tiles-renderer/core';
 import {
 	Points,
 	PointsMaterial,

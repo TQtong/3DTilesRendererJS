@@ -1,4 +1,4 @@
-import { CesiumIonAuthPlugin as CesiumIonAuthPluginImpl } from '3d-tiles-renderer/core/plugins';
+import { CesiumIonAuthPlugin as CesiumIonAuthPluginImpl } from 'um-3d-tiles-renderer/core/plugins';
 import { TMSTilesPlugin } from './images/EPSGTilesPlugin.js';
 import { QuantizedMeshPlugin } from './QuantizedMeshPlugin.js';
 
@@ -43,7 +43,7 @@ export class CesiumIonAuthPlugin extends CesiumIonAuthPluginImpl {
 		if ( options.__suppress_warning__ ) {
 
 			console.warn(
-				'CesiumIonAuthPlugin: Plugin has been moved to "3d-tiles-renderer/core/plugins".'
+				'CesiumIonAuthPlugin: Plugin has been moved to "um-3d-tiles-renderer/core/plugins".'
 			);
 
 		}

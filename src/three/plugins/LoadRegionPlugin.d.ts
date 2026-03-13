@@ -1,5 +1,5 @@
-import { TileBoundingVolume, TilesRenderer, OBB } from '3d-tiles-renderer/three';
-import { Tile } from '3d-tiles-renderer/core';
+import { TileBoundingVolume, TilesRenderer, OBB } from 'um-3d-tiles-renderer/three';
+import { Tile } from 'um-3d-tiles-renderer/core';
 import { Sphere, Ray } from 'three';
 
 declare class BaseRegion {

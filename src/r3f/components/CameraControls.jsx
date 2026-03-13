@@ -1,6 +1,6 @@
 import { forwardRef, useMemo, useEffect, useContext } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
-import { EnvironmentControls as EnvironmentControlsImpl, GlobeControls as GlobeControlsImpl } from '3d-tiles-renderer/three';
+import { EnvironmentControls as EnvironmentControlsImpl, GlobeControls as GlobeControlsImpl } from 'um-3d-tiles-renderer/three';
 import { useShallowOptions } from '../utilities/useOptions.js';
 import { EllipsoidContext } from './TilesRenderer.jsx';
 import { useApplyRefs } from '../utilities/useApplyRefs.js';

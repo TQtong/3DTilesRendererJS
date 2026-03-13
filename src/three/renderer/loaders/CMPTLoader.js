@@ -1,5 +1,5 @@
 import { Group, DefaultLoadingManager, Matrix4 } from 'three';
-import { CMPTLoaderBase } from '3d-tiles-renderer/core';
+import { CMPTLoaderBase } from 'um-3d-tiles-renderer/core';
 import { B3DMLoader } from './B3DMLoader.js';
 import { PNTSLoader } from './PNTSLoader.js';
 import { I3DMLoader } from './I3DMLoader.js';

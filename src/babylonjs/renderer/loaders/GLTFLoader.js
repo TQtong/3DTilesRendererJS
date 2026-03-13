@@ -1,4 +1,4 @@
-import { LoaderBase } from '3d-tiles-renderer/core';
+import { LoaderBase } from 'um-3d-tiles-renderer/core';
 import { Matrix, Quaternion } from '@babylonjs/core/Maths/math.vector';
 import { LoadAssetContainerAsync } from '@babylonjs/core/Loading/sceneLoader';
 import '@babylonjs/loaders/glTF/2.0';

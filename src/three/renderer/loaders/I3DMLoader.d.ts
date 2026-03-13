@@ -1,4 +1,4 @@
-import { I3DMBaseResult, I3DMLoaderBase, BatchTable, FeatureTable } from '3d-tiles-renderer/core';
+import { I3DMBaseResult, I3DMLoaderBase, BatchTable, FeatureTable } from 'um-3d-tiles-renderer/core';
 import { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Group, LoadingManager } from 'three';
 

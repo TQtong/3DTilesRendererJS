@@ -1,6 +1,6 @@
 import { Color, BufferAttribute, Matrix4, Vector3, Box3, Triangle, CanvasTexture } from 'three';
-import { PriorityQueue, PriorityQueueItemRemovedError } from '3d-tiles-renderer/core';
-import { CesiumIonAuth, GoogleCloudAuth } from '3d-tiles-renderer/core/plugins';
+import { PriorityQueue, PriorityQueueItemRemovedError } from 'um-3d-tiles-renderer/core';
+import { CesiumIonAuth, GoogleCloudAuth } from 'um-3d-tiles-renderer/core/plugins';
 import { XYZImageSource } from './sources/XYZImageSource.js';
 import { QuadKeyImageSource } from './sources/QuadKeyImageSource.js';
 import { TMSImageSource } from './sources/TMSImageSource.js';
@@ -8,7 +8,7 @@ import { getMeshesCartographicRange, getMeshesPlanarRange } from './overlays/uti
 import { wrapOverlaysMaterial } from './overlays/wrapOverlaysMaterial.js';
 import { GeometryClipper } from '../utilities/GeometryClipper.js';
 import { WMTSImageSource } from './sources/WMTSImageSource.js';
-import { MemoryUtils } from '3d-tiles-renderer/three';
+import { MemoryUtils } from 'um-3d-tiles-renderer/three';
 import { GeoJSONImageSource } from './sources/GeoJSONImageSource.js';
 import { WMSImageSource } from './sources/WMSImageSource.js';
 import { TiledRegionImageSource } from './sources/RegionImageSource.js';

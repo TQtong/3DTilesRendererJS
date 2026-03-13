@@ -1,1 +1,1 @@
-export { GoogleCloudAuthPlugin } from '3d-tiles-renderer/core/plugins';
+export { GoogleCloudAuthPlugin } from 'um-3d-tiles-renderer/core/plugins';

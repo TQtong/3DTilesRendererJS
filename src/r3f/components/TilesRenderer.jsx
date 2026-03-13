@@ -1,7 +1,7 @@
 import { createContext, useMemo, useContext, useEffect, useRef, forwardRef, useCallback, useState, useLayoutEffect, useReducer } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import { Object3D } from 'three';
-import { TilesRenderer as TilesRendererImpl, WGS84_ELLIPSOID } from '3d-tiles-renderer/three';
+import { TilesRenderer as TilesRendererImpl, WGS84_ELLIPSOID } from 'um-3d-tiles-renderer/three';
 import { useDeepOptions } from '../utilities/useOptions.js';
 import { useObjectDep } from '../utilities/useObjectDep.js';
 import { useApplyRefs } from '../utilities/useApplyRefs.js';

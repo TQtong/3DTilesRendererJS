@@ -1,5 +1,5 @@
 import { Camera } from 'three';
-import { CameraTransitionManager } from '3d-tiles-renderer/three';
+import { CameraTransitionManager } from 'um-3d-tiles-renderer/three';
 
 interface CameraTransitionProps {
     mode?: 'perspective' | 'orthographic';
