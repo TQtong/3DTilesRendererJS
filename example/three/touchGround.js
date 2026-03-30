@@ -1,21 +1,8 @@
 /**
- * touchGround.js — GroundDecalManager 的测试/演示页面
+ * touchGround.js — GroundDecalManager 测试/演示页面
  *
- * 功能：
- * 1. 创建 Cesium Ion 地形瓦片场景
- * 2. 使用 GroundDecalManager 创建各种标绘图形（点、线、多边形、矩形、扇形、圆、标签、箭头标绘）
- * 3. 通过 lil-gui 面板实时控制所有图形的样式参数
- *
- * GUI 面板结构：
- * - Global: 全局不透明度
- * - Point: 点标记样式（圆/方、大小、颜色）
- * - Line: 折线样式（颜色、线宽、端点箭头）
- * - Polygon: 多边形样式
- * - Rectangle: 矩形样式
- * - Sector: 扇形样式（半径、角度）
- * - Circle: 圆样式
- * - Label: 文字标签
- * - Arrow Plot: 箭头标绘图形（细箭头/曲线箭头/攻击箭头）
+ * 数据结构对齐 types.ts（GisPlotBaseOptions / PlotPointOptions / ...）。
+ * 所有 add* 调用传入单一 options 对象，样式字段使用 fillColor / strokeColor 命名。
  */
 import { GlobeControls, TilesRenderer } from '3d-tiles-renderer';
 import { CesiumIonAuthPlugin, QuantizedMeshPlugin, GLTFExtensionsPlugin, ImageOverlayPlugin, CesiumIonOverlay } from '3d-tiles-renderer/plugins';
@@ -28,13 +15,11 @@ import {
 } from 'three';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
-import { GroundDecalManager } from './GroundDecalManager.js';
+import { GroundDecalManager } from './plot/index.js';
 
 let camera, controls, scene, renderer, tiles, imageryOverlay;
-// GroundDecalManager 实例
 let decals;
-// 各图形的 ID，用于 GUI 回调中调用 setStyle/setSize 等
-let pointId, polylineId, polygonId, rectId, sectorId, circleId, labelId, arrowPlotId;
+let pointId, lineId, polygonId, rectId, sectorId, circleId, textId, arrowId;
 
 const apiKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1MDA4MTA3YS1mZDNmLTQyYzMtYjg3Ny1jN2EzNWNkNzBhNzYiLCJpZCI6MTE0MDgzLCJpYXQiOjE3NzA0NTY5NjZ9.ky7zHUKW9YVxb1LB6jW0PLdv0I9pPIFDdytlLcPUb-Y';
 
@@ -44,26 +29,23 @@ const params = {
 	reload: reinstantiateTiles,
 };
 
-// ── 样式参数 ──
-// 与 store.ts 中的 PlotBaseOptions / PlotLineOptions / PlotTextOptions 等对应。
-// fillOpacity/strokeOpacity 使用 0-100 整数百分比（store 格式）。
-// GUI 控件的 onChange 回调调用 apply* 函数，将 S 的值同步到 decals.setStyle()。
+// ── GUI 参数（对齐 GisPlotBaseOptions 命名） ──
 
 const S = {
 	globalOpacity: 1.0,
 
-	// Point
+	// Point (PlotPointOptions)
 	pointStyle: 'circle',
 	pointSize: 2000,
-	pointFill: '#3B82F6',
+	pointFillColor: '#3B82F6',
 	pointFillOpacity: 80,
-	pointStroke: '#1D4ED8',
+	pointStrokeColor: '#1D4ED8',
 	pointStrokeWidth: 2,
 	pointStrokeOpacity: 100,
 	pointVisible: true,
 
-	// Line (polyline)
-	lineStroke: '#ff00ff',
+	// Line (PlotLineOptions)
+	lineStrokeColor: '#ff00ff',
 	lineStrokeWidth: 8,
 	lineStrokeOpacity: 90,
 	lineStartArrow: 'none',
@@ -71,26 +53,26 @@ const S = {
 	lineArrowSize: 20,
 	lineVisible: true,
 
-	// Polygon
-	polyFill: '#3B82F6',
+	// Polygon (PlotPolygonOptions)
+	polyFillColor: '#3B82F6',
 	polyFillOpacity: 40,
-	polyStroke: '#1D4ED8',
+	polyStrokeColor: '#1D4ED8',
 	polyStrokeWidth: 4,
 	polyStrokeOpacity: 100,
 	polyVisible: true,
 
-	// Rectangle
-	rectFill: '#22c55e',
+	// Rectangle (PlotRectangleOptions)
+	rectFillColor: '#22c55e',
 	rectFillOpacity: 60,
-	rectStroke: '#15803d',
+	rectStrokeColor: '#15803d',
 	rectStrokeWidth: 2,
 	rectStrokeOpacity: 100,
 	rectVisible: true,
 
-	// Sector
-	sectorFill: '#f59e0b',
+	// Sector (PlotSectorOptions)
+	sectorFillColor: '#f59e0b',
 	sectorFillOpacity: 50,
-	sectorStroke: '#b45309',
+	sectorStrokeColor: '#b45309',
 	sectorStrokeWidth: 3,
 	sectorStrokeOpacity: 100,
 	sectorRadius: 8000,
@@ -99,30 +81,30 @@ const S = {
 	sectorVisible: true,
 
 	// Circle
-	circleFill: '#ef4444',
+	circleFillColor: '#ef4444',
 	circleFillOpacity: 50,
-	circleStroke: '#ffff00',
+	circleStrokeColor: '#ffff00',
 	circleStrokeWidth: 6,
 	circleStrokeOpacity: 100,
 	circleVisible: true,
 
-	// Arrow Plot
+	// Arrow (PlotArrowOptions)
 	arrowType: 'fine',
-	arrowFill: '#3B82F6',
+	arrowFillColor: '#3B82F6',
 	arrowFillOpacity: 60,
-	arrowStroke: '#1D4ED8',
+	arrowStrokeColor: '#1D4ED8',
 	arrowStrokeWidth: 2,
 	arrowStrokeOpacity: 100,
 	arrowHeadSize: 16,
 	arrowVisible: true,
 
-	// Label
-	labelText: '思茅区',
-	labelFill: '#ffffff',
-	labelStroke: '#000000',
-	labelStrokeWidth: 5,
-	labelFontSize: 64,
-	labelVisible: true,
+	// Text (PlotTextOptions)
+	textContent: '思茅区',
+	textFontColor: '#ffffff',
+	textFontSize: 64,
+	textStrokeColor: '#000000',
+	textStrokeWidth: 5,
+	textVisible: true,
 };
 
 init();
@@ -172,17 +154,17 @@ function reinstantiateTiles() {
 		}
 	} ) );
 
-	tiles.registerPlugin( new ImageOverlayPlugin( {
-		renderer,
-		overlays: [],
-	} ) );
-
 	imageryOverlay = new CesiumIonOverlay( {
-		assetId: '3813',
+		assetId: '3',
 		apiToken: params.ionAccessToken,
 		opacity: 1.0,
 		color: '#ffffff',
 	} );
+
+	tiles.registerPlugin( new ImageOverlayPlugin( {
+		renderer,
+		overlays: [ imageryOverlay ],
+	} ) );
 
 	tiles.group.rotation.x = - Math.PI / 2;
 
@@ -202,27 +184,27 @@ function reinstantiateTiles() {
 
 }
 
-// ────────────────────── style apply helpers ──────────────────────
+// ────────────────────── apply helpers ──────────────────────
 
 function applyPoint() {
 
 	decals.setStyle( pointId, {
-		fill: S.pointFill,
+		fillColor: S.pointFillColor,
 		fillOpacity: S.pointFillOpacity,
-		stroke: S.pointStroke,
+		strokeColor: S.pointStrokeColor,
 		strokeWidth: S.pointStrokeWidth,
 		strokeOpacity: S.pointStrokeOpacity,
 		pointStyle: S.pointStyle,
+		size: S.pointSize,
 		visible: S.pointVisible,
 	} );
-	decals.setSize( pointId, S.pointSize );
 
 }
 
 function applyLine() {
 
-	decals.setStyle( polylineId, {
-		stroke: S.lineStroke,
+	decals.setStyle( lineId, {
+		strokeColor: S.lineStrokeColor,
 		strokeWidth: S.lineStrokeWidth,
 		strokeOpacity: S.lineStrokeOpacity,
 		startArrowStyle: S.lineStartArrow === 'none' ? null : S.lineStartArrow,
@@ -236,9 +218,9 @@ function applyLine() {
 function applyPoly() {
 
 	decals.setStyle( polygonId, {
-		fill: S.polyFill,
+		fillColor: S.polyFillColor,
 		fillOpacity: S.polyFillOpacity,
-		stroke: S.polyStroke,
+		strokeColor: S.polyStrokeColor,
 		strokeWidth: S.polyStrokeWidth,
 		strokeOpacity: S.polyStrokeOpacity,
 		visible: S.polyVisible,
@@ -249,9 +231,9 @@ function applyPoly() {
 function applyRect() {
 
 	decals.setStyle( rectId, {
-		fill: S.rectFill,
+		fillColor: S.rectFillColor,
 		fillOpacity: S.rectFillOpacity,
-		stroke: S.rectStroke,
+		strokeColor: S.rectStrokeColor,
 		strokeWidth: S.rectStrokeWidth,
 		strokeOpacity: S.rectStrokeOpacity,
 		visible: S.rectVisible,
@@ -262,17 +244,15 @@ function applyRect() {
 function applySector() {
 
 	decals.setStyle( sectorId, {
-		fill: S.sectorFill,
+		fillColor: S.sectorFillColor,
 		fillOpacity: S.sectorFillOpacity,
-		stroke: S.sectorStroke,
+		strokeColor: S.sectorStrokeColor,
 		strokeWidth: S.sectorStrokeWidth,
 		strokeOpacity: S.sectorStrokeOpacity,
-		visible: S.sectorVisible,
-	} );
-	decals.setSize( sectorId, {
 		radius: S.sectorRadius,
 		startAngle: S.sectorStartAngle,
 		sectorAngle: S.sectorAngle,
+		visible: S.sectorVisible,
 	} );
 
 }
@@ -280,9 +260,9 @@ function applySector() {
 function applyCircle() {
 
 	decals.setStyle( circleId, {
-		fill: S.circleFill,
+		fillColor: S.circleFillColor,
 		fillOpacity: S.circleFillOpacity,
-		stroke: S.circleStroke,
+		strokeColor: S.circleStrokeColor,
 		strokeWidth: S.circleStrokeWidth,
 		strokeOpacity: S.circleStrokeOpacity,
 		visible: S.circleVisible,
@@ -290,25 +270,25 @@ function applyCircle() {
 
 }
 
-function applyLabel() {
+function applyText() {
 
-	decals.setText( labelId, S.labelText );
-	decals.setStyle( labelId, {
-		fill: S.labelFill,
-		stroke: S.labelStroke,
-		strokeWidth: S.labelStrokeWidth,
-		font: S.labelFontSize + 'px sans-serif',
-		visible: S.labelVisible,
+	decals.setStyle( textId, {
+		content: S.textContent,
+		fontColor: S.textFontColor,
+		fontSize: S.textFontSize,
+		strokeColor: S.textStrokeColor,
+		strokeWidth: S.textStrokeWidth,
+		visible: S.textVisible,
 	} );
 
 }
 
 function applyArrow() {
 
-	decals.setStyle( arrowPlotId, {
-		fill: S.arrowFill,
+	decals.setStyle( arrowId, {
+		fillColor: S.arrowFillColor,
 		fillOpacity: S.arrowFillOpacity,
-		stroke: S.arrowStroke,
+		strokeColor: S.arrowStrokeColor,
 		strokeWidth: S.arrowStrokeWidth,
 		strokeOpacity: S.arrowStrokeOpacity,
 		arrowType: S.arrowType,
@@ -318,18 +298,18 @@ function applyArrow() {
 
 }
 
-// ────────────────────── GUI builder helpers ──────────────────────
+// ────────────────────── GUI helpers ──────────────────────
 
 function addFillControls( folder, prefix, apply ) {
 
-	folder.addColor( S, prefix + 'Fill' ).name( 'Fill' ).onChange( apply );
+	folder.addColor( S, prefix + 'FillColor' ).name( 'Fill' ).onChange( apply );
 	folder.add( S, prefix + 'FillOpacity', 0, 100, 1 ).name( 'Fill Opacity' ).onChange( apply );
 
 }
 
 function addStrokeControls( folder, prefix, apply, maxW = 20 ) {
 
-	folder.addColor( S, prefix + 'Stroke' ).name( 'Stroke' ).onChange( apply );
+	folder.addColor( S, prefix + 'StrokeColor' ).name( 'Stroke' ).onChange( apply );
 	folder.add( S, prefix + 'StrokeWidth', 0, maxW, 1 ).name( 'Stroke Width' ).onChange( apply );
 	folder.add( S, prefix + 'StrokeOpacity', 0, 100, 1 ).name( 'Stroke Opacity' ).onChange( apply );
 
@@ -341,7 +321,7 @@ function addVisibleToggle( folder, prefix, apply ) {
 
 }
 
-// ────────────────────── init / resize / animate ──────────────────────
+// ────────────────────── init ──────────────────────
 
 function init() {
 
@@ -358,65 +338,80 @@ function init() {
 	document.body.appendChild( renderer.domElement );
 	renderer.domElement.tabIndex = 1;
 
-	camera = new PerspectiveCamera(
-		60,
-		window.innerWidth / window.innerHeight,
-		1,
-		160000000
-	);
+	camera = new PerspectiveCamera( 60, window.innerWidth / window.innerHeight, 1, 160000000 );
 	camera.position.set( 2620409, 0, - 6249816 );
 	camera.lookAt( 0, 0, 0 );
 
 	controls = new GlobeControls( scene, camera, renderer.domElement );
 	controls.enableDamping = true;
 
-	// ── Create decals ──
+	// ── 创建标绘图形 ──
 	decals = new GroundDecalManager( renderer );
 
-	pointId = decals.addPoint(
-		{ lon: 100.75, lat: 22.75 },
-		S.pointSize,
-		{ fill: S.pointFill, fillOpacity: S.pointFillOpacity, stroke: S.pointStroke, strokeWidth: S.pointStrokeWidth, strokeOpacity: S.pointStrokeOpacity, pointStyle: S.pointStyle }
-	);
+	pointId = decals.addPoint( {
+		points: [[ 120, 30 ]],
+		size: S.pointSize,
+		pointStyle: S.pointStyle,
+		fillColor: S.pointFillColor,
+		fillOpacity: S.pointFillOpacity,
+		strokeColor: S.pointStrokeColor,
+		strokeWidth: S.pointStrokeWidth,
+		strokeOpacity: S.pointStrokeOpacity,
+		visible: S.pointVisible,
+	} );
 
-	polylineId = decals.addPolyline(
-		[[ 100.50, 22.85 ], [ 100.60, 22.90 ], [ 100.70, 22.87 ], [ 100.80, 22.92 ], [ 100.90, 22.88 ]],
-		{ stroke: S.lineStroke, strokeWidth: S.lineStrokeWidth, strokeOpacity: S.lineStrokeOpacity, startArrowStyle: null, endArrowStyle: 'filled', arrowSize: S.lineArrowSize }
-	);
+	lineId = decals.addLine( {
+		points: [[ 100.50, 22.85 ], [ 100.60, 22.90 ], [ 100.70, 22.87 ], [ 100.80, 22.92 ], [ 100.90, 22.88 ]],
+		strokeColor: S.lineStrokeColor, strokeWidth: S.lineStrokeWidth, strokeOpacity: S.lineStrokeOpacity,
+		startArrowStyle: null, endArrowStyle: 'filled', arrowSize: S.lineArrowSize,
+		visible: S.lineVisible,
+	} );
 
-	polygonId = decals.addPolygon(
-		[[ 100.60, 22.60 ], [ 100.70, 22.55 ], [ 100.75, 22.65 ], [ 100.68, 22.70 ], [ 100.58, 22.67 ]],
-		{ fill: S.polyFill, fillOpacity: S.polyFillOpacity, stroke: S.polyStroke, strokeWidth: S.polyStrokeWidth, strokeOpacity: S.polyStrokeOpacity }
-	);
+	polygonId = decals.addPolygon( {
+		points: [[ 100.60, 22.60 ], [ 100.70, 22.55 ], [ 100.75, 22.65 ], [ 100.68, 22.70 ], [ 100.58, 22.67 ]],
+		fillColor: S.polyFillColor, fillOpacity: S.polyFillOpacity,
+		strokeColor: S.polyStrokeColor, strokeWidth: S.polyStrokeWidth, strokeOpacity: S.polyStrokeOpacity,
+		visible: S.polyVisible,
+	} );
 
-	rectId = decals.addRect(
-		{ lon: 100.848518, lat: 22.732947 },
-		{ w: 20000, h: 20000 },
-		{ fill: S.rectFill, fillOpacity: S.rectFillOpacity, stroke: S.rectStroke, strokeWidth: S.rectStrokeWidth, strokeOpacity: S.rectStrokeOpacity }
-	);
+	rectId = decals.addRectangle( {
+		points: [[ 100.848518, 22.732947 ]],
+		width: 20000, height: 20000,
+		fillColor: S.rectFillColor, fillOpacity: S.rectFillOpacity,
+		strokeColor: S.rectStrokeColor, strokeWidth: S.rectStrokeWidth, strokeOpacity: S.rectStrokeOpacity,
+		visible: S.rectVisible,
+	} );
 
-	sectorId = decals.addSector(
-		{ lon: 100.85, lat: 22.65 },
-		S.sectorRadius, S.sectorStartAngle, S.sectorAngle,
-		{ fill: S.sectorFill, fillOpacity: S.sectorFillOpacity, stroke: S.sectorStroke, strokeWidth: S.sectorStrokeWidth, strokeOpacity: S.sectorStrokeOpacity }
-	);
+	sectorId = decals.addSector( {
+		points: [[ 100.85, 22.65 ]],
+		radius: S.sectorRadius, startAngle: S.sectorStartAngle, sectorAngle: S.sectorAngle,
+		fillColor: S.sectorFillColor, fillOpacity: S.sectorFillOpacity,
+		strokeColor: S.sectorStrokeColor, strokeWidth: S.sectorStrokeWidth, strokeOpacity: S.sectorStrokeOpacity,
+		visible: S.sectorVisible,
+	} );
 
-	circleId = decals.addCircle(
-		{ lon: 100.95, lat: 22.80 },
-		8000,
-		{ fill: S.circleFill, fillOpacity: S.circleFillOpacity, stroke: S.circleStroke, strokeWidth: S.circleStrokeWidth, strokeOpacity: S.circleStrokeOpacity }
-	);
+	circleId = decals.addCircle( {
+		points: [[ 100.95, 22.80 ]],
+		radius: 8000,
+		fillColor: S.circleFillColor, fillOpacity: S.circleFillOpacity,
+		strokeColor: S.circleStrokeColor, strokeWidth: S.circleStrokeWidth, strokeOpacity: S.circleStrokeOpacity,
+		visible: S.circleVisible,
+	} );
 
-	labelId = decals.addLabel(
-		{ lon: 100.848518, lat: 22.732947 },
-		S.labelText,
-		{ font: S.labelFontSize + 'px sans-serif', fill: S.labelFill, stroke: S.labelStroke, strokeWidth: S.labelStrokeWidth }
-	);
+	textId = decals.addText( {
+		points: [[ 100.848518, 22.732947 ]],
+		content: S.textContent, fontColor: S.textFontColor, fontSize: S.textFontSize,
+		strokeColor: S.textStrokeColor, strokeWidth: S.textStrokeWidth,
+		visible: S.textVisible,
+	} );
 
-	arrowPlotId = decals.addArrowPlot(
-		[[ 100.50, 22.70 ], [ 100.60, 22.78 ], [ 100.75, 22.60 ]],
-		{ fill: S.arrowFill, fillOpacity: S.arrowFillOpacity, stroke: S.arrowStroke, strokeWidth: S.arrowStrokeWidth, strokeOpacity: S.arrowStrokeOpacity, arrowType: S.arrowType, headSize: S.arrowHeadSize }
-	);
+	arrowId = decals.addArrow( {
+		points: [[ 100.50, 22.70 ], [ 100.60, 22.78 ], [ 100.75, 22.60 ]],
+		arrowType: S.arrowType, headSize: S.arrowHeadSize,
+		fillColor: S.arrowFillColor, fillOpacity: S.arrowFillOpacity,
+		strokeColor: S.arrowStrokeColor, strokeWidth: S.arrowStrokeWidth, strokeOpacity: S.arrowStrokeOpacity,
+		visible: S.arrowVisible,
+	} );
 
 	reinstantiateTiles();
 
@@ -479,17 +474,17 @@ function init() {
 	addStrokeControls( ciF, 'circle', applyCircle );
 	addVisibleToggle( ciF, 'circle', applyCircle );
 
-	// Label
-	const laF = gui.addFolder( 'Label' );
-	laF.add( S, 'labelText' ).name( 'Text' ).onFinishChange( applyLabel );
-	laF.addColor( S, 'labelFill' ).name( 'Color' ).onChange( applyLabel );
-	laF.addColor( S, 'labelStroke' ).name( 'Outline' ).onChange( applyLabel );
-	laF.add( S, 'labelStrokeWidth', 0, 15, 1 ).name( 'Outline Width' ).onChange( applyLabel );
-	laF.add( S, 'labelFontSize', 16, 128, 4 ).name( 'Font Size' ).onChange( applyLabel );
-	addVisibleToggle( laF, 'label', applyLabel );
+	// Text
+	const txF = gui.addFolder( 'Text' );
+	txF.add( S, 'textContent' ).name( 'Content' ).onFinishChange( applyText );
+	txF.addColor( S, 'textFontColor' ).name( 'Font Color' ).onChange( applyText );
+	txF.add( S, 'textFontSize', 16, 128, 4 ).name( 'Font Size' ).onChange( applyText );
+	txF.addColor( S, 'textStrokeColor' ).name( 'Outline' ).onChange( applyText );
+	txF.add( S, 'textStrokeWidth', 0, 15, 1 ).name( 'Outline Width' ).onChange( applyText );
+	addVisibleToggle( txF, 'text', applyText );
 
-	// Arrow Plot
-	const arF = gui.addFolder( 'Arrow Plot' );
+	// Arrow
+	const arF = gui.addFolder( 'Arrow' );
 	arF.add( S, 'arrowType', [ 'fine', 'curved', 'attack', 'straight' ] ).name( 'Type' ).onChange( applyArrow );
 	addFillControls( arF, 'arrow', applyArrow );
 	addStrokeControls( arF, 'arrow', applyArrow );
