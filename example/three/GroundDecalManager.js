@@ -201,9 +201,7 @@ void main() {
 	vec2 pos = vec2( e, n );
 
 	// 抗锯齿宽度：基于相邻像素的位置差异，限制上限防止 LOD 边界渗透
-	float rawAA = max( fwidth( e ), fwidth( n ) );
-	if ( rawAA > 500.0 ) return;           // 位置跳变 > 500m，数据不可靠
-	float aa = min( rawAA * 1.5, 200.0 );  // AA 宽度上限 200m
+	float aa = max( fwidth( e ), fwidth( n ) ) * 1.5;
 
 	// ── 遍历所有图形 ──
 	// 数据格式：arr[0] = 图形总数，之后每个图形：[type, total, fill4, stroke4, sw, op, ...params]
