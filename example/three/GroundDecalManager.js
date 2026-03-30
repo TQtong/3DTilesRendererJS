@@ -1,3 +1,31 @@
+/**
+ * GroundDecalManager — 地面贴花/标绘渲染管理器
+ *
+ * 核心原理：使用 shader-based SDF（Signed Distance Field）方式，
+ * 将标绘图形直接在 fragment shader 中解析式计算，无需 Canvas 纹理图集。
+ *
+ * 渲染流程：
+ * 1. 将场景渲染到深度纹理（depthRT）
+ * 2. 在全屏后处理 pass 中，每个 fragment 从深度缓冲重建 ECEF 世界坐标
+ * 3. 将 ECEF 投影到 ENU（East-North-Up）局部切面坐标 (e, n)（米制）
+ * 4. 对每个图形，用 SDF 函数计算 fragment 到图形边界的距离
+ * 5. 根据 SDF 值应用 fill/stroke 颜色与 smoothstep 抗锯齿
+ *
+ * 支持的图形类型（shader type ID）：
+ *   0 = rect（矩形）       — sdBox SDF
+ *   1 = circle（圆）       — 点到圆心距离 SDF
+ *   2 = polygon（多边形）  — winding number 内外判定 + 边距离（箭头标绘也复用此类型）
+ *   3 = polyline（折线）   — 到线段最小距离 - 半线宽 + 端点箭头 SDF（triangle/diamond/circle/bar）
+ *   4 = label（文字标签）  — 采样 label atlas 纹理
+ *   5 = sector（扇形）     — 角度+半径判定 + 弧线 SDF
+ *   6 = point（点标记）    — 圆形/方形 SDF
+ *
+ * 箭头标绘（arrowPlot）：细箭头/曲线箭头/攻击箭头等，由 ArrowUtils.js 在 CPU 端
+ * 根据控制点生成多边形顶点，打包为 type 2 (polygon) 渲染，无需额外 shader 类型。
+ *
+ * 图形数据通过 Float32 DataTexture 传入 shader，每个图形占若干 float：
+ *   [type, totalFloats, fillRGBA(4), strokeRGBA(4), strokeWidth, opacity, ...typeSpecificData]
+ */
 import { createFineArrow, createCurvedArrow, createAttackArrow } from './ArrowUtils.js';
 import {
 	Scene,
@@ -21,6 +49,8 @@ import {
 } from 'three';
 
 // ── Shaders ──
+// 顶点着色器：全屏四边形，传递 UV 坐标
+// 片元着色器：从深度缓冲重建位置，逐 fragment 计算所有图形的 SDF
 
 const DECAL_VERTEX = /* glsl */ `
 out vec2 vUv;
@@ -36,18 +66,22 @@ precision highp int;
 in vec2 vUv;
 out vec4 fragColor;
 
-uniform sampler2D tColor;
-uniform sampler2D tDepth;
-uniform sampler2D tShapeData;
-uniform sampler2D tLabelAtlas;
-uniform mat4 uInvProjection;
-uniform mat4 uViewToECEF;
-uniform vec3 uOffsetHigh;
-uniform vec3 uOffsetLow;
-uniform vec3 uEast;
-uniform vec3 uNorth;
-uniform float uGlobalOpacity;
+// ── Uniforms ──
+uniform sampler2D tColor;       // 场景颜色纹理（深度 pass 的色彩输出）
+uniform sampler2D tDepth;       // 场景深度纹理（用于重建世界坐标）
+uniform sampler2D tShapeData;   // 图形数据纹理（Float32 DataTexture，存储所有图形参数）
+uniform sampler2D tLabelAtlas;  // 文字标签 atlas 纹理
+uniform mat4 uInvProjection;    // 相机投影矩阵的逆（clip → view 空间）
+uniform mat4 uViewToECEF;       // view → ECEF 变换矩阵（tilesGroup.matrixWorldInverse * camera.matrixWorld）
+uniform vec3 uOffsetHigh;       // 双精度偏移（高位）：相机在 ECEF 中相对于参考中心的位移
+uniform vec3 uOffsetLow;        // 双精度偏移（低位）：补偿 float32 精度不足
+uniform vec3 uEast;             // ENU 坐标系东向单位向量（ECEF 空间）
+uniform vec3 uNorth;            // ENU 坐标系北向单位向量（ECEF 空间）
+uniform float uGlobalOpacity;   // 全局不透明度（0~1）
 
+// ── 数据读取 ──
+// 从 Float32 DataTexture 中按索引读取一个 float 值。
+// 数据以 RGBA 四通道存储，索引 i 对应第 i/4 个像素的第 i%4 个通道。
 float readF( int i ) {
 	int pi = i / 4;
 	vec4 t = texelFetch( tShapeData, ivec2( pi, 0 ), 0 );
@@ -55,17 +89,22 @@ float readF( int i ) {
 	return c == 0 ? t.x : c == 1 ? t.y : c == 2 ? t.z : t.w;
 }
 
+// ── SDF 基础原语 ──
+
+// 轴对齐矩形 SDF：负值在内部，正值在外部
 float sdBox( vec2 p, vec2 b ) {
 	vec2 d = abs( p ) - b;
 	return length( max( d, 0.0 ) ) + min( max( d.x, d.y ), 0.0 );
 }
 
+// 线段距离：点 p 到线段 [a, b] 的最短距离（无符号）
 float sdSeg( vec2 p, vec2 a, vec2 b ) {
 	vec2 pa = p - a, ba = b - a;
 	float h = clamp( dot( pa, ba ) / dot( ba, ba ), 0.0, 1.0 );
 	return length( pa - ba * h );
 }
 
+// 三角形 SDF（Inigo Quilez 经典实现）：负值在内部，正值在外部
 float sdTri( vec2 p, vec2 a, vec2 b, vec2 c ) {
 	vec2 e0 = b - a, e1 = c - b, e2 = a - c;
 	vec2 v0 = p - a, v1 = p - b, v2 = p - c;
@@ -80,25 +119,38 @@ float sdTri( vec2 p, vec2 a, vec2 b, vec2 c ) {
 	return - sqrt( dm.x ) * sign( dm.y );
 }
 
+// ── 折线端点箭头 SDF ──
+// 在局部旋转坐标系中计算箭头形状。local.x = 沿线方向，local.y = 垂直方向。
+// style: 1=filled三角, 2=open三角, 3=filled菱形, 4=open菱形,
+//        5=filled圆, 6=open圆, 7=bar横杠
+// sz: 箭头大小（mPerPx 缩放后的米制值）
+// hw: 折线半线宽（米），用于计算重叠量 ov 以消除线段与箭头的接缝
 float arrowSdf( vec2 local, int style, float sz, float hw ) {
-	float w = max( sz * 0.45, hw * 1.5 );
-	sz = max( sz, hw * 4.0 );
-	float ov = hw * 2.0;
+	float w = sz * 0.45;       // 翼宽 = 箭头大小的 45%
+	float ov = hw * 2.0;       // 重叠量：向线段内延伸 2 倍半线宽，消除接缝
 	if ( style == 1 || style == 2 ) {
+		// 三角形：尖端在 (sz,0)，底边在 x=-ov 处展开 ±w
 		return sdTri( local, vec2( sz, 0.0 ), vec2( - ov, w ), vec2( - ov, - w ) );
 	} else if ( style == 3 || style == 4 ) {
+		// 菱形：L1 范数（曼哈顿距离）构成的菱形 SDF
 		vec2 shifted = vec2( local.x + ov * 0.5, local.y );
 		vec2 al = abs( shifted );
 		float hs = ( sz + ov ) * 0.5;
 		return ( al.x / hs + al.y / w ) - 1.0;
 	} else if ( style == 5 || style == 6 ) {
-		return length( local ) - max( sz * 0.4, hw * 2.0 );
+		// 圆点：点到中心距离 - 半径
+		return length( local ) - sz * 0.4;
 	} else if ( style == 7 ) {
-		return sdBox( local, vec2( sz * 0.08, w)  );
+		// 横杠：沿线方向窄（8%），垂直方向宽（w）
+		return sdBox( local, vec2( sz * 0.08, w ) );
 	}
 	return 1e10;
 }
 
+// ── Fill / Stroke 渲染 ──
+
+// 应用填充色。sdf < 0 表示在图形内部。
+// smoothstep(-aa, 0, sdf) 在边界处产生平滑过渡（抗锯齿），宽度 = aa 米。
 void applyFill( inout vec4 result, vec4 fc, float sdf, float aa, float op ) {
 	if ( fc.w > 0.001 && sdf < aa ) {
 		float m = 1.0 - smoothstep( - aa, 0.0, sdf );
@@ -106,6 +158,10 @@ void applyFill( inout vec4 result, vec4 fc, float sdf, float aa, float op ) {
 	}
 }
 
+// 应用描边色。stroke 仅在 fill 边界外侧绘制，宽度 = sw 米。
+// inner: 从 sdf=0（边界）向外过渡到 1，确保不侵入 fill 内部。
+// outer: 从 sdf=sw（描边外缘）向外过渡到 0。
+// m = inner * outer: 仅在 sdf ∈ [0, sw] 区间为正值。
 void applyStroke( inout vec4 result, vec4 sc, float sdf, float sw, float aa, float op ) {
 	if ( sc.w > 0.001 && sw > 0.0 ) {
 		float inner = smoothstep( - aa, 0.0, sdf );
@@ -116,41 +172,60 @@ void applyStroke( inout vec4 result, vec4 sc, float sdf, float sw, float aa, flo
 }
 
 void main() {
+	// 读取当前像素的场景颜色和深度
 	vec4 scene = texture( tColor, vUv );
 	float depth = texture( tDepth, vUv ).r;
 
 	fragColor = scene;
+	// 天空像素（深度≈1）不需要贴花
 	if ( depth >= 0.9999 ) return;
+	// 深度梯度过大说明处于地形 LOD 瓦片边界，位置重建不可靠
 	if ( fwidth( depth ) > 0.0005 ) return;
 
+	// ── 从深度重建 ECEF 世界坐标 ──
+	// 1. 屏幕 UV + 深度 → NDC clip 坐标
 	vec4 cp = vec4( vUv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0 );
+	// 2. clip → view 空间（相机坐标系）
 	vec4 vp = uInvProjection * cp;
 	vec3 view = vp.xyz / vp.w;
+	// 3. view → ECEF（通过旋转部分 + 双精度平移偏移）
 	vec3 rot = mat3( uViewToECEF ) * view;
+	// 双精度技巧：分 high + low 两步相加，避免大坐标 + 小偏移的精度丢失
 	vec3 delta = ( rot + uOffsetHigh ) + uOffsetLow;
 
+	// ── 投影到 ENU 局部切面坐标（米制） ──
+	// delta 是 fragment 在 ECEF 中相对于参考中心的偏移向量
+	// dot 到 East/North 轴得到局部米制坐标 (e, n)
 	float e = dot( delta, uEast );
 	float n = dot( delta, uNorth );
 	vec2 pos = vec2( e, n );
 
-	float aa = max( fwidth( e ), fwidth( n ) ) * 1.5;
+	// 抗锯齿宽度：基于相邻像素的位置差异，限制上限防止 LOD 边界渗透
+	float rawAA = max( fwidth( e ), fwidth( n ) );
+	if ( rawAA > 500.0 ) return;           // 位置跳变 > 500m，数据不可靠
+	float aa = min( rawAA * 1.5, 200.0 );  // AA 宽度上限 200m
 
+	// ── 遍历所有图形 ──
+	// 数据格式：arr[0] = 图形总数，之后每个图形：[type, total, fill4, stroke4, sw, op, ...params]
 	int count = int( readF( 0 ) );
 	int off = 1;
 	vec4 result = scene;
 
-	for ( int s = 0; s < 64; s ++ ) {
+	for ( int s = 0; s < 64; s ++ ) {    // 最多处理 64 个图形
 
 		if ( s >= count ) break;
 
-		int type  = int( readF( off ) );
-		int total = int( readF( off + 1 ) );
+		// 读取图形公共头部（12 floats）
+		int type  = int( readF( off ) );       // 图形类型 ID
+		int total = int( readF( off + 1 ) );   // 该图形占用的总 float 数（用于跳到下一个图形）
 
-		vec4  fc = vec4( readF( off + 2 ), readF( off + 3 ), readF( off + 4 ), readF( off + 5 ) );
-		vec4  sc = vec4( readF( off + 6 ), readF( off + 7 ), readF( off + 8 ), readF( off + 9 ) );
-		float sw = readF( off + 10 );
-		float op = readF( off + 11 );
+		vec4  fc = vec4( readF( off + 2 ), readF( off + 3 ), readF( off + 4 ), readF( off + 5 ) );  // fill RGBA（alpha 已含 fillOpacity）
+		vec4  sc = vec4( readF( off + 6 ), readF( off + 7 ), readF( off + 8 ), readF( off + 9 ) );  // stroke RGBA（alpha 已含 strokeOpacity）
+		float sw = readF( off + 10 );          // 描边宽度（米）
+		float op = readF( off + 11 );          // 可见性标记（1.0 可见，0.0 隐藏）
 
+		// ── type 0: 矩形 ──
+		// 数据：[12] centerE, [13] centerN, [14] halfW, [15] halfH
 		if ( type == 0 ) {
 
 			vec2 c  = vec2( readF( off + 12 ), readF( off + 13 ) );
@@ -159,6 +234,8 @@ void main() {
 			applyFill( result, fc, d, aa, op );
 			applyStroke( result, sc, d, sw, aa, op );
 
+		// ── type 1: 圆 ──
+		// 数据：[12] centerE, [13] centerN, [14] radius
 		} else if ( type == 1 ) {
 
 			vec2  c = vec2( readF( off + 12 ), readF( off + 13 ) );
@@ -167,22 +244,27 @@ void main() {
 			applyFill( result, fc, d, aa, op );
 			applyStroke( result, sc, d, sw, aa, op );
 
+		// ── type 2: 多边形（也用于箭头标绘图形） ──
+		// 数据：[12] vertexCount, [13..] v0_e, v0_n, v1_e, v1_n, ...
+		// 内外判定使用 Winding Number 算法，描边使用到最近边的距离
 		} else if ( type == 2 ) {
 
-			int vc = int( readF( off + 12 ) );
-			int vs = off + 13;
-			int wn = 0;
-			float ed = 1e10;
+			int vc = int( readF( off + 12 ) );   // 顶点数
+			int vs = off + 13;                    // 顶点数据起始偏移
+			int wn = 0;                           // winding number（非零 = 内部）
+			float ed = 1e10;                      // 到最近边的距离
 
-			for ( int i = 0; i < 64; i ++ ) {
+			for ( int i = 0; i < 64; i ++ ) {    // 最多 64 个顶点
 
 				if ( i >= vc ) break;
-				int j = i + 1 < vc ? i + 1 : 0;
+				int j = i + 1 < vc ? i + 1 : 0;  // 下一个顶点（闭合回到第一个）
 				vec2 a = vec2( readF( vs + i * 2 ), readF( vs + i * 2 + 1 ) );
 				vec2 b = vec2( readF( vs + j * 2 ), readF( vs + j * 2 + 1 ) );
 
 				ed = min( ed, sdSeg( pos, a, b ) );
 
+				// Winding Number 算法：统计多边形边界绕测试点的圈数
+				// 向上穿越且在左侧 → wn++，向下穿越且在右侧 → wn--
 				if ( a.y <= pos.y ) {
 					if ( b.y > pos.y ) {
 						if ( ( b.x - a.x ) * ( pos.y - a.y ) - ( pos.x - a.x ) * ( b.y - a.y ) > 0.0 ) wn ++;
@@ -195,26 +277,31 @@ void main() {
 
 			}
 
-			bool inside = wn != 0;
-			float d = inside ? - ed : ed;
+			bool inside = wn != 0;               // wn ≠ 0 → 点在多边形内部
+			float d = inside ? - ed : ed;         // 有符号距离：内部为负
 			applyFill( result, fc, d, aa, op );
 			applyStroke( result, sc, d, sw, aa, op );
 
+		// ── type 3: 折线 + 端点箭头 ──
+		// 数据：[12] vc, [13] hw, [14] startArrowStyle, [15] endArrowStyle,
+		//       [16] arrowSize, [17..] v0_e, v0_n, v1_e, v1_n, ...
 		} else if ( type == 3 ) {
 
-			int   vc = int( readF( off + 12 ) );
-			float hw = readF( off + 13 );
-			int   sa = int( readF( off + 14 ) );
-			int   ea = int( readF( off + 15 ) );
-			float asz = readF( off + 16 );
-			int   vs = off + 17;
+			int   vc = int( readF( off + 12 ) );   // 顶点数
+			float hw = readF( off + 13 );           // 半线宽（米）
+			int   sa = int( readF( off + 14 ) );    // 起点箭头样式（0=无）
+			int   ea = int( readF( off + 15 ) );    // 终点箭头样式（0=无）
+			float asz = readF( off + 16 );           // 箭头大小（米）
+			int   vs = off + 17;                     // 顶点数据起始偏移
 			float d  = 1e10;
 
-			vec2 v0 = vec2( readF( vs ), readF( vs + 1 ) );
-			vec2 v1 = vec2( readF( vs + 2 ), readF( vs + 3 ) );
-			vec2 vL = vec2( readF( vs + ( vc - 1 ) * 2 ), readF( vs + ( vc - 1 ) * 2 + 1 ) );
-			vec2 vP = vec2( readF( vs + ( vc - 2 ) * 2 ), readF( vs + ( vc - 2 ) * 2 + 1 ) );
+			// 预读首段和末段端点（用于箭头方向计算）
+			vec2 v0 = vec2( readF( vs ), readF( vs + 1 ) );                                      // 第一个顶点
+			vec2 v1 = vec2( readF( vs + 2 ), readF( vs + 3 ) );                                  // 第二个顶点
+			vec2 vL = vec2( readF( vs + ( vc - 1 ) * 2 ), readF( vs + ( vc - 1 ) * 2 + 1 ) );   // 最后一个顶点
+			vec2 vP = vec2( readF( vs + ( vc - 2 ) * 2 ), readF( vs + ( vc - 2 ) * 2 + 1 ) );   // 倒数第二个顶点
 
+			// 计算到所有线段的最小距离（capsule 形状）
 			for ( int i = 0; i < 63; i ++ ) {
 
 				if ( i >= vc - 1 ) break;
@@ -224,8 +311,10 @@ void main() {
 
 			}
 
-			d -= hw;
+			d -= hw; // 减去半线宽：capsule → 折线 SDF
 
+			// 裁剪端点圆弧：有箭头的端点用半平面裁剪，移除 capsule 的圆形端帽
+			// beyond > 0 表示 fragment 在端点之外（圆弧区域），强制 d 为正值
 			if ( sa > 0 ) {
 
 				float beyond = - dot( pos - v0, normalize( v1 - v0 ) );
@@ -240,10 +329,12 @@ void main() {
 
 			}
 
+			// 计算端点箭头 SDF
 			float arrowD = 1e10;
 
-			if ( sa > 0 ) {
+			if ( sa > 0 && asz > 0.0 ) {
 
+				// 起点箭头：建立局部坐标系（x=从线内指向线外，y=垂直）
 				vec2 dr = normalize( v0 - v1 );
 				vec2 lc = vec2( dot( pos - v0, dr ), dot( pos - v0, vec2( - dr.y, dr.x ) ) );
 				float ad = arrowSdf( lc, sa, asz, hw );
@@ -251,8 +342,9 @@ void main() {
 
 			}
 
-			if ( ea > 0 ) {
+			if ( ea > 0 && asz > 0.0 ) {
 
+				// 终点箭头：同理，方向为最后一段的延伸方向
 				vec2 dr = normalize( vL - vP );
 				vec2 lc = vec2( dot( pos - vL, dr ), dot( pos - vL, vec2( - dr.y, dr.x ) ) );
 				float ad = arrowSdf( lc, ea, asz, hw );
@@ -260,6 +352,7 @@ void main() {
 
 			}
 
+			// 合并折线 SDF 和箭头 SDF（取并集）
 			bool arrowFilled = ( sa == 1 || sa == 3 || sa == 5 || ea == 1 || ea == 3 || ea == 5 );
 			float combined = min( d, arrowD );
 
@@ -269,11 +362,13 @@ void main() {
 
 				if ( arrowFilled && arrowD < d && arrowD < aa ) {
 
+					// 实心箭头区域：用箭头 SDF 独立渲染 fill + stroke
 					applyFill( result, lc, arrowD, aa, op );
 					applyStroke( result, lc, arrowD, sw, aa, op );
 
 				} else {
 
+					// 折线体部或非实心箭头区域
 					float m = 1.0 - smoothstep( - aa, 0.0, combined );
 					result = mix( result, vec4( lc.rgb, 1.0 ), max( lc.w, fc.w ) * op * m * uGlobalOpacity );
 
@@ -281,6 +376,7 @@ void main() {
 
 			}
 
+			// 空心箭头（open）：仅描边，不填充
 			if ( arrowD < aa && ! arrowFilled ) {
 
 				vec4 lc = sc.w > 0.001 ? sc : fc;
@@ -288,18 +384,25 @@ void main() {
 
 			}
 
+		// ── type 4: 文字标签 ──
+		// 数据：[12] centerE, [13] centerN, [14] halfW, [15] halfH,
+		//       [16] u0, [17] v0, [18] u1, [19] v1（atlas UV 边界）
+		// 文字预渲染到 label atlas canvas，shader 中采样纹理。
+		// 每个标签在 atlas 中有独立的均匀缩放 tile，不受全局 extent 影响。
 		} else if ( type == 4 ) {
 
 			vec2 c  = vec2( readF( off + 12 ), readF( off + 13 ) );
 			vec2 hs = vec2( readF( off + 14 ), readF( off + 15 ) );
 			vec4 ub = vec4( readF( off + 16 ), readF( off + 17 ), readF( off + 18 ), readF( off + 19 ) );
 
+			// 将 ENU 位置映射到标签 tile 的局部 UV [0,1]
 			vec2 local = vec2(
 				( pos.x - c.x + hs.x ) / ( 2.0 * hs.x ),
-				1.0 - ( pos.y - c.y + hs.y ) / ( 2.0 * hs.y )
+				1.0 - ( pos.y - c.y + hs.y ) / ( 2.0 * hs.y )  // y 翻转：北→上 对应 UV v=0
 			);
 
 			if ( local.x >= 0.0 && local.x <= 1.0 && local.y >= 0.0 && local.y <= 1.0 ) {
+				// 将局部 UV 映射到 atlas 中的 tile UV 范围
 				vec2 auv = mix( ub.xy, ub.zw, local );
 				vec4 lc = texture( tLabelAtlas, auv );
 				if ( lc.a > 0.01 ) {
@@ -307,32 +410,44 @@ void main() {
 				}
 			}
 
+		// ── type 5: 扇形 ──
+		// 数据：[12] centerE, [13] centerN, [14] radius, [15] startAngle(rad), [16] sectorAngle(rad)
+		// 内外判定：dist <= radius AND 角度在 [startAngle, startAngle+sectorAngle] 内
+		// 角度测试使用叉积（cross product），比 atan2 更稳定且无跨 π 问题
 		} else if ( type == 5 ) {
 
 			vec2  c  = vec2( readF( off + 12 ), readF( off + 13 ) );
 			float r  = readF( off + 14 );
-			float sa = readF( off + 15 );
-			float da = readF( off + 16 );
+			float sa = readF( off + 15 );   // 起始角（弧度）
+			float da = readF( off + 16 );   // 扇形角（弧度）
 
-			vec2 d = pos - c;
+			vec2 d = pos - c;               // 到扇形中心的向量
 			float dist = length( d );
 
+			// 扇形两条半径的方向向量
 			vec2 e1 = vec2( cos( sa ), sin( sa ) );
 			vec2 e2 = vec2( cos( sa + da ), sin( sa + da ) );
+			// 叉积判断点在边向量的哪一侧
 			float cr1 = d.x * e1.y - d.y * e1.x;
 			float cr2 = d.x * e2.y - d.y * e2.x;
 
+			// 角度判定：扇形角 ≤ π 时用 AND，> π 时用 OR
 			bool inAngle = da <= 3.14159 ? ( cr1 >= 0.0 && cr2 <= 0.0 ) : ( cr1 >= 0.0 || cr2 <= 0.0 );
 			bool inside = inAngle && dist <= r;
 
+			// 边缘距离（用于 fill AA）
 			float ed = min( sdSeg( d, vec2( 0.0 ), r * e1 ), sdSeg( d, vec2( 0.0 ), r * e2 ) );
 			if ( inAngle ) ed = min( ed, abs( dist - r ) );
 
+			// Fill 只用弧线距离（直线边保持硬边界，避免渗透线条）
 			float fillSdf = inAngle ? ( dist - r ) : ed;
 			applyFill( result, fc, fillSdf, aa, op );
+			// Stroke 仅沿弧线绘制（不在两条半径上描边）
 			float arcSdf = inAngle ? ( dist - r ) : 1e10;
 			applyStroke( result, sc, arcSdf, sw, aa, op );
 
+		// ── type 6: 点标记 ──
+		// 数据：[12] centerE, [13] centerN, [14] halfSize, [15] pointStyle (0=圆, 1=方)
 		} else if ( type == 6 ) {
 
 			vec2  c  = vec2( readF( off + 12 ), readF( off + 13 ) );
@@ -355,13 +470,20 @@ void main() {
 
 // ── Helpers ──
 
+// 自增图形 ID
 let _nextId = 1;
 const DEG2RAD = MathUtils.DEG2RAD;
+// 参考密度，用于将像素单位的 strokeWidth 换算到米制
 const REF_DENSITY = 4096;
+// 标签 atlas 画布尺寸
 const LABEL_ATLAS = 2048;
-
+// 复用的临时 Vector3（避免每次 lonLatToMeters 创建新对象）
 const _pos = new Vector3();
 
+/**
+ * 将经纬度坐标转换为 ENU 局部切面坐标（米制）
+ * 算法：lon/lat → ECEF（通过椭球体）→ 减去参考中心 → 投影到 East/North 轴
+ */
 function lonLatToMeters( lonDeg, latDeg, centerLonRad, centerLatRad, ellipsoid, east, north, centerECEF ) {
 
 	ellipsoid.getCartographicToPosition( latDeg * DEG2RAD, lonDeg * DEG2RAD, 0, _pos );
@@ -377,6 +499,7 @@ function lonLatToMeters( lonDeg, latDeg, centerLonRad, centerLatRad, ellipsoid, 
 
 function parseColorToRGBA( color ) {
 
+	// 支持格式：'#hex', 'rgb(r,g,b)', 'rgba(r,g,b,a)', 'transparent', null
 	if ( ! color || color === 'transparent' ) return [ 0, 0, 0, 0 ];
 
 	if ( typeof color === 'string' ) {
@@ -412,6 +535,12 @@ function parseColorToRGBA( color ) {
 
 }
 
+/**
+ * 解析不透明度参数，向后兼容两种格式：
+ * - store 格式：fillOpacity/strokeOpacity（0-100 整数百分比）
+ * - 旧格式：opacity（0-1 浮点数，同时应用于 fill 和 stroke）
+ * 结果写入 base[0]=fillOpacity(0-1), base[1]=strokeOpacity(0-1)
+ */
 function resolveOpacity( style, base ) {
 
 	if ( style.fillOpacity !== undefined ) base[ 0 ] = style.fillOpacity / 100;
@@ -428,13 +557,21 @@ function resolveOpacity( style, base ) {
 
 export class GroundDecalManager {
 
+	/**
+	 * @param {WebGLRenderer} renderer - three.js WebGL 渲染器
+	 * @param {object} [options] - 初始化选项
+	 * @param {number} [options.opacity=1.0] - 全局不透明度
+	 */
 	constructor( renderer, options = {} ) {
 
 		this._renderer = renderer;
+		// 所有图形存储在 Map<id, itemData> 中，key 是自增 ID
 		this._items = new Map();
+		// 脏标记：任何图形的增删改都会设为 true，下次 render() 时触发 _rebuildShapeData()
 		this._dataDirty = true;
 		this._globalOpacity = options.opacity ?? 1.0;
 
+		// ENU（East-North-Up）参考坐标系，以所有图形的地理中心为原点
 		this._centerECEF = new Vector3();
 		this._east = new Vector3();
 		this._north = new Vector3();
@@ -444,20 +581,27 @@ export class GroundDecalManager {
 		this._ellipsoid = null;
 		this._tilesGroup = null;
 
+		// 所有图形的最大范围（米），用于 strokeWidth 像素→米换算
 		this._maxExtent = 1;
 
+		// view → ECEF 变换矩阵（每帧更新）
 		this._viewToECEF = new Matrix4();
 
+		// 图形数据纹理（Float32 RGBA DataTexture，存储所有图形的 SDF 参数）
 		this._shapeDataTex = null;
 		this._shapeDataTexWidth = 1;
+		// 标签 atlas：每个文字标签预渲染到此 canvas，shader 中采样
 		this._labelCanvas = document.createElement( 'canvas' );
 		this._labelCanvas.width = LABEL_ATLAS;
 		this._labelCanvas.height = LABEL_ATLAS;
 		this._labelAtlasTex = new CanvasTexture( this._labelCanvas );
+		// 不翻转 Y，使 canvas y=0 对应纹理 v=0
 		this._labelAtlasTex.flipY = false;
 		this._labelAtlasTex.minFilter = LinearFilter;
 		this._labelAtlasTex.magFilter = LinearFilter;
 
+		// GPU 资源
+		// GPU 资源（在 _initGPU 中创建）
 		this._depthRT = null;
 		this._compositeScene = null;
 		this._compositeCamera = null;
@@ -467,8 +611,17 @@ export class GroundDecalManager {
 
 	}
 
-	// ── Public: shape creation ──
+	// ── Public: 图形创建 ──
+	// 每个 add* 方法创建一个图形项，存入 _items，返回唯一 ID。
+	// 设置 _dataDirty = true，下次 render() 时自动重建数据纹理。
 
+	/**
+	 * 添加矩形
+	 * @param {{lon: number, lat: number}} center - 中心经纬度
+	 * @param {{w: number, h: number} | number} size - 宽高（米），或单一数值表示正方形
+	 * @param {object} [style] - 样式参数
+	 * @returns {number} 图形 ID
+	 */
 	addRect( center, size, style = {} ) {
 
 		const id = _nextId ++;
@@ -486,6 +639,11 @@ export class GroundDecalManager {
 
 	}
 
+	/**
+	 * 添加圆
+	 * @param {{lon, lat}} center - 中心经纬度
+	 * @param {number} radius - 半径（米）
+	 */
 	addCircle( center, radius, style = {} ) {
 
 		const id = _nextId ++;
@@ -500,6 +658,10 @@ export class GroundDecalManager {
 
 	}
 
+	/**
+	 * 添加多边形
+	 * @param {Array<[lon, lat]>} coords - 顶点数组，至少 3 个（shader 最多支持 64 个）
+	 */
 	addPolygon( coords, style = {} ) {
 
 		const id = _nextId ++;
@@ -513,6 +675,11 @@ export class GroundDecalManager {
 
 	}
 
+	/**
+	 * 添加折线
+	 * @param {Array<[lon, lat]>} coords - 顶点数组，至少 2 个
+	 * @param {object} [style] - 可含 startArrowStyle, endArrowStyle, arrowSize
+	 */
 	addPolyline( coords, style = {} ) {
 
 		const id = _nextId ++;
@@ -526,6 +693,12 @@ export class GroundDecalManager {
 
 	}
 
+	/**
+	 * 添加文字标签（预渲染到 label atlas canvas，shader 中纹理采样）
+	 * @param {{lon, lat}} center - 中心经纬度
+	 * @param {string} text - 文字内容
+	 * @param {object} [style] - 可含 font, fill, stroke, strokeWidth, textAlign, fontColor
+	 */
 	addLabel( center, text, style = {} ) {
 
 		const id = _nextId ++;
@@ -540,6 +713,13 @@ export class GroundDecalManager {
 
 	}
 
+	/**
+	 * 添加扇形
+	 * @param {{lon, lat}} center - 中心经纬度
+	 * @param {number} radius - 半径（米）
+	 * @param {number} startAngle - 起始角度（度，从东向逆时针）
+	 * @param {number} sectorAngle - 扇形角度（度）
+	 */
 	addSector( center, radius, startAngle, sectorAngle, style = {} ) {
 
 		const id = _nextId ++;
@@ -556,6 +736,12 @@ export class GroundDecalManager {
 
 	}
 
+	/**
+	 * 添加点标记
+	 * @param {{lon, lat}} center - 中心经纬度
+	 * @param {number} size - 直径（米）
+	 * @param {object} [style] - 可含 pointStyle: 'circle' | 'square'
+	 */
 	addPoint( center, size, style = {} ) {
 
 		const id = _nextId ++;
@@ -570,6 +756,11 @@ export class GroundDecalManager {
 
 	}
 
+	/**
+	 * 添加箭头标绘图形（CPU 端由 ArrowUtils 生成多边形顶点，复用 type 2 渲染）
+	 * @param {Array<[lon, lat]>} controlPoints - 控制点数组
+	 * @param {object} [style] - 可含 arrowType: 'fine'|'curved'|'attack'|'straight', headSize
+	 */
 	addArrowPlot( controlPoints, style = {} ) {
 
 		const id = _nextId ++;
@@ -601,8 +792,10 @@ export class GroundDecalManager {
 
 	}
 
-	// ── Public: query & modify ──
+	// ── Public: 查询与修改 ──
+	// 所有修改方法都设置 _dataDirty = true，下次 render() 时自动重建。
 
+	/** 获取图形的数据快照（深拷贝），返回 null 表示不存在 */
 	getItem( id ) {
 
 		const item = this._items.get( id );
@@ -630,6 +823,7 @@ export class GroundDecalManager {
 
 	}
 
+	/** 合并更新图形的样式属性（Object.assign 方式，只覆盖传入的字段） */
 	setStyle( id, style ) {
 
 		const item = this._items.get( id );
@@ -640,6 +834,7 @@ export class GroundDecalManager {
 
 	}
 
+	/** 修改图形中心坐标，支持只传 lon 或 lat */
 	setCenter( id, center ) {
 
 		const item = this._items.get( id );
@@ -651,6 +846,7 @@ export class GroundDecalManager {
 
 	}
 
+	/** 修改图形大小。rect: {w,h}或数字; circle/sector: 数字或{radius,startAngle,sectorAngle}; point: 数字 */
 	setSize( id, size ) {
 
 		const item = this._items.get( id );
@@ -686,6 +882,7 @@ export class GroundDecalManager {
 
 	}
 
+	/** 替换多边形/折线的全部顶点坐标 */
 	setCoords( id, coords ) {
 
 		const item = this._items.get( id );
@@ -696,6 +893,7 @@ export class GroundDecalManager {
 
 	}
 
+	/** 修改单个顶点坐标（用于拖拽编辑） */
 	setCoord( id, index, coord ) {
 
 		const item = this._items.get( id );
@@ -708,6 +906,7 @@ export class GroundDecalManager {
 
 	}
 
+	/** 在指定索引处插入新顶点 */
 	insertCoord( id, index, coord ) {
 
 		const item = this._items.get( id );
@@ -719,6 +918,7 @@ export class GroundDecalManager {
 
 	}
 
+	/** 删除指定索引的顶点（保证不低于最小顶点数：多边形 3，折线 2） */
 	removeCoord( id, index ) {
 
 		const item = this._items.get( id );
@@ -733,6 +933,7 @@ export class GroundDecalManager {
 
 	}
 
+	/** 平移所有顶点（用于整体拖拽） */
 	translateCoords( id, dLon, dLat ) {
 
 		const item = this._items.get( id );
@@ -749,6 +950,7 @@ export class GroundDecalManager {
 
 	}
 
+	/** 修改标签文字内容 */
 	setText( id, text ) {
 
 		const item = this._items.get( id );
@@ -759,12 +961,14 @@ export class GroundDecalManager {
 
 	}
 
+	/** 设置全局不透明度（不触发数据重建，直接修改 uniform） */
 	setGlobalOpacity( opacity ) {
 
 		this._globalOpacity = opacity;
 
 	}
 
+	/** 获取顶点数量 */
 	getCoordCount( id ) {
 
 		const item = this._items.get( id );
@@ -773,6 +977,7 @@ export class GroundDecalManager {
 
 	}
 
+	/** 查找距给定经纬度最近的顶点索引（用于鼠标命中检测） */
 	findNearestCoord( id, lon, lat ) {
 
 		const item = this._items.get( id );
@@ -799,8 +1004,9 @@ export class GroundDecalManager {
 
 	}
 
-	// ── Public: lifecycle ──
+	// ── Public: 生命周期 ──
 
+	/** 设置椭球体和瓦片组引用（必须在 render 前调用） */
 	setEllipsoid( ellipsoid, tilesGroup ) {
 
 		this._ellipsoid = ellipsoid;
@@ -809,6 +1015,7 @@ export class GroundDecalManager {
 
 	}
 
+	/** 窗口大小变化时更新深度渲染目标尺寸 */
 	resize( w, h ) {
 
 		if ( ! this._depthRT ) return;
@@ -818,10 +1025,16 @@ export class GroundDecalManager {
 
 	}
 
+	/**
+	 * 每帧渲染入口。执行两个 pass：
+	 * 1. 深度 pass：将场景渲染到 depthRT（获取颜色+深度纹理）
+	 * 2. 合成 pass：全屏四边形 + SDF shader，从深度重建位置并绘制所有标绘图形
+	 */
 	render( scene, camera, tilesGroup ) {
 
 		if ( this._items.size === 0 || ! this._ellipsoid ) return;
 
+		// 脏数据时重建 DataTexture（惰性更新，避免每帧重建）
 		if ( this._dataDirty ) {
 
 			this._rebuildShapeData();
@@ -830,10 +1043,12 @@ export class GroundDecalManager {
 
 		const renderer = this._renderer;
 
+		// Pass 1: 渲染场景到深度目标
 		renderer.setRenderTarget( this._depthRT );
 		renderer.render( scene, camera );
 		renderer.setRenderTarget( null );
 
+		// 计算 view → ECEF 变换矩阵和双精度偏移
 		this._viewToECEF.multiplyMatrices( tilesGroup.matrixWorldInverse, camera.matrixWorld );
 		const el = this._viewToECEF.elements;
 
@@ -858,6 +1073,7 @@ export class GroundDecalManager {
 
 	}
 
+	/** 释放所有 GPU 资源 */
 	dispose() {
 
 		if ( this._depthRT ) this._depthRT.dispose();
@@ -867,8 +1083,9 @@ export class GroundDecalManager {
 
 	}
 
-	// ── Private: GPU resources ──
+	// ── Private: GPU 资源初始化 ──
 
+	/** 创建深度渲染目标、图形数据纹理、合成 ShaderMaterial、全屏四边形 */
 	_initGPU() {
 
 		const w = window.innerWidth * window.devicePixelRatio;
@@ -914,8 +1131,18 @@ export class GroundDecalManager {
 
 	}
 
-	// ── Private: data rebuild ──
+	// ── Private: 数据重建 ──
 
+	/**
+	 * 将所有图形数据打包到 Float32 DataTexture 中。
+	 * 格式：arr[0] = 图形总数，之后每个图形按类型打包：
+	 *   [type, totalFloats, fillRGBA(4), strokeRGBA(4), strokeWidth, opacity, ...typeData]
+	 *
+	 * 此方法在每次 render() 发现 _dataDirty 时被调用，触发场景包括：
+	 * - 添加/删除/修改图形
+	 * - 修改样式
+	 * - 修改顶点坐标
+	 */
 	_rebuildShapeData() {
 
 		this._dataDirty = false;
@@ -1123,6 +1350,10 @@ export class GroundDecalManager {
 
 	}
 
+	/**
+	 * 计算所有图形的地理中心（经纬度平均值），
+	 * 然后在该中心点建立 ENU 局部坐标系（East/North/Up 轴向量）
+	 */
 	_computeCenter() {
 
 		let lonSum = 0, latSum = 0, count = 0;
@@ -1164,6 +1395,11 @@ export class GroundDecalManager {
 
 	}
 
+	/**
+	 * 计算所有图形的最大空间范围（米），用于：
+	 * 1. strokeWidth 像素到米的换算：mPerPx = maxExtent / REF_DENSITY
+	 * 2. 标签 atlas 的 metersPerPixel 计算
+	 */
 	_computeMaxExtent() {
 
 		let eMin = Infinity, eMax = - Infinity;
@@ -1218,6 +1454,7 @@ export class GroundDecalManager {
 
 	}
 
+	/** 将箭头样式字符串映射为 shader 中的整数 ID（0=无，1-7 对应 arrowSdf 的 style 参数） */
 	_arrowStyleToInt( style ) {
 
 		if ( ! style ) return 0;
@@ -1231,6 +1468,7 @@ export class GroundDecalManager {
 
 	}
 
+	/** 经纬度 → ENU 米制坐标的便捷封装 */
 	_toMeters( lonDeg, latDeg ) {
 
 		return lonLatToMeters(
@@ -1241,8 +1479,16 @@ export class GroundDecalManager {
 
 	}
 
-	// ── Private: label atlas ──
+	// ── Private: 标签 atlas 构建 ──
 
+	/**
+	 * 将所有标签文字渲染到 label atlas canvas 中。
+	 * 每个标签获得一个独立的矩形 tile，行打包布局。
+	 * 返回 Map<id, {halfW, halfH, u0, v0, u1, v1}>，
+	 * 其中 halfW/halfH 是地理半尺寸（米），u0~v1 是 atlas 中的 UV 边界。
+	 *
+	 * @param {number} mPerPx - 每 canvas 像素对应的米数（= maxExtent / REF_DENSITY）
+	 */
 	_buildLabelAtlas( mPerPx ) {
 
 		const tiles = new Map();

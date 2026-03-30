@@ -1,3 +1,22 @@
+/**
+ * touchGround.js — GroundDecalManager 的测试/演示页面
+ *
+ * 功能：
+ * 1. 创建 Cesium Ion 地形瓦片场景
+ * 2. 使用 GroundDecalManager 创建各种标绘图形（点、线、多边形、矩形、扇形、圆、标签、箭头标绘）
+ * 3. 通过 lil-gui 面板实时控制所有图形的样式参数
+ *
+ * GUI 面板结构：
+ * - Global: 全局不透明度
+ * - Point: 点标记样式（圆/方、大小、颜色）
+ * - Line: 折线样式（颜色、线宽、端点箭头）
+ * - Polygon: 多边形样式
+ * - Rectangle: 矩形样式
+ * - Sector: 扇形样式（半径、角度）
+ * - Circle: 圆样式
+ * - Label: 文字标签
+ * - Arrow Plot: 箭头标绘图形（细箭头/曲线箭头/攻击箭头）
+ */
 import { GlobeControls, TilesRenderer } from '3d-tiles-renderer';
 import { CesiumIonAuthPlugin, QuantizedMeshPlugin, GLTFExtensionsPlugin, ImageOverlayPlugin, CesiumIonOverlay } from '3d-tiles-renderer/plugins';
 import {
@@ -12,7 +31,9 @@ import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 import { GroundDecalManager } from './GroundDecalManager.js';
 
 let camera, controls, scene, renderer, tiles, imageryOverlay;
+// GroundDecalManager 实例
 let decals;
+// 各图形的 ID，用于 GUI 回调中调用 setStyle/setSize 等
 let pointId, polylineId, polygonId, rectId, sectorId, circleId, labelId, arrowPlotId;
 
 const apiKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1MDA4MTA3YS1mZDNmLTQyYzMtYjg3Ny1jN2EzNWNkNzBhNzYiLCJpZCI6MTE0MDgzLCJpYXQiOjE3NzA0NTY5NjZ9.ky7zHUKW9YVxb1LB6jW0PLdv0I9pPIFDdytlLcPUb-Y';
@@ -23,7 +44,10 @@ const params = {
 	reload: reinstantiateTiles,
 };
 
-// ── Style parameters matching store plot types ──
+// ── 样式参数 ──
+// 与 store.ts 中的 PlotBaseOptions / PlotLineOptions / PlotTextOptions 等对应。
+// fillOpacity/strokeOpacity 使用 0-100 整数百分比（store 格式）。
+// GUI 控件的 onChange 回调调用 apply* 函数，将 S 的值同步到 decals.setStyle()。
 
 const S = {
 	globalOpacity: 1.0,
