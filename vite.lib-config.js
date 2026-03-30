@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { packageAliases } from './vite.config.js';
@@ -31,9 +32,15 @@ export default ( { mode } ) => {
 			outDir: './build/',
 			minify: true,
 			rollupOptions: {
-				external: ( p ) => {
+				external: ( id ) => {
 
-					return ! /^[./\\]/.test( p ) && ! /^3d-tiles-renderer/.test( p );
+					if ( path.isAbsolute( id ) ) return false;
+					const n = id.replace( /\\/g, '/' );
+					if ( n.startsWith( '.' ) ) return false;
+					// Rollup may normalize lib entries to "src/..." without a leading "./"
+					if ( n.startsWith( 'src/' ) ) return false;
+					if ( /^3d-tiles-renderer/.test( id ) ) return false;
+					return true;
 
 				},
 			},

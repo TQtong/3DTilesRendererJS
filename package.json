@@ -97,6 +97,7 @@
     "@babylonjs/loaders": "^8.47.2",
     "cesium": "^1.132.0",
     "concurrently": "^6.2.1",
+    "earcut": "^3.0.2",
     "eslint": "^9.0.0",
     "eslint-config-mdcs": "^5.0.0",
     "eslint-plugin-react": "^7.37.1",

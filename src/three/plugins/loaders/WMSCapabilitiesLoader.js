@@ -1,5 +1,5 @@
 import { LoaderBase, WGS84_RADIUS } from '3d-tiles-renderer/core';
-import { ProjectionScheme } from '../images/utils/ProjectionScheme';
+import { ProjectionScheme } from '../images/utils/ProjectionScheme.js';
 import { MathUtils } from 'three';
 
 const EQUATOR_CIRCUMFERENCE = WGS84_RADIUS * Math.PI * 2;
