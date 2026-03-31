@@ -11,7 +11,7 @@ export class PlotOverlay {
 	color: Color;
 	frame: Matrix4 | null;
 	fetchOptions: unknown;
-	preprocessURL: unknown;
+	preprocessURL: ( url: string ) => string | null;
 	alphaMask: boolean;
 	alphaInvert: boolean;
 	imageSource: PlotImageSource;
