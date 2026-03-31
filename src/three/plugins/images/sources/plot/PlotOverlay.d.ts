@@ -1,4 +1,4 @@
-import { Color, Texture } from 'three';
+import { Color, Matrix4, Texture } from 'three';
 import { PlotImageSource } from './PlotImageSource.js';
 
 export class PlotOverlay {
@@ -9,7 +9,7 @@ export class PlotOverlay {
 
 	opacity: number;
 	color: Color;
-	frame: unknown;
+	frame: Matrix4 | null;
 	fetchOptions: unknown;
 	preprocessURL: unknown;
 	alphaMask: boolean;
