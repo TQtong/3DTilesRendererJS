@@ -6,7 +6,8 @@
  *   ├── index.js              ← 统一导出（本文件）
  *   ├── GroundDecalManager.js  ← 标绘管理器（图形 CRUD + PlotOverlay）
  *   ├── PlotOverlay.js         ← ImageOverlay 接口实现
- *   ├── PlotImageSource.js     ← Canvas 2D 渲染源
+ *   ├── PlotImageSource.js     ← SDF GPU 渲染源
+ *   ├── TileSdfShader.js       ← Per-tile SDF 着色器
  *   ├── PlotBase.js            ← 标绘基类
  *   ├── PlotPoint.js           ← 点标绘
  *   ├── PlotLine.js            ← 折线标绘

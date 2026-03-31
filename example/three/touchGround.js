@@ -331,7 +331,7 @@ function init() {
 	controls.enableDamping = true;
 
 	// ── 创建标绘 ──
-	decals = new GroundDecalManager();
+	decals = new GroundDecalManager( { renderer } );
 
 	pointId = decals.addPoint( {
 		points: [[ 120, 30 ]],

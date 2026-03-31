@@ -1,22 +1,44 @@
 /**
- * PlotImageSource.js — 标绘图形 Canvas 2D 渲染源
+ * PlotImageSource.js — 标绘图形 SDF 渲染源
  *
- * 参考 GeoJSONImageSource，将所有标绘图形渲染到 per-tile CanvasTexture 上。
+ * 使用 WebGLRenderTarget + SDF ShaderMaterial 将标绘图形渲染到 per-tile 纹理上。
  * 继承 RegionImageSource（DataCache），支持 lock/release/get 缓存机制。
  *
  * 核心流程：
  *   1. ImageOverlayPlugin 调用 hasContent(range) 判断该瓦片是否有图形
- *   2. 调用 lock(range) / get(range) → fetchItem(tokens) 创建 CanvasTexture
- *   3. _drawToCanvas 将所有与该瓦片相交的图形用 Canvas 2D 绘制到 canvas 上
- *   4. 数据变化时调用 redraw() 重绘所有已缓存的 canvas
+ *   2. 调用 lock(range) → fetchItem(tokens) → SDF 渲染到 WebGLRenderTarget → 拷贝纹理
+ *   3. 数据变化时调用 redraw() 重新渲染所有已缓存的瓦片
  */
 
-import { CanvasTexture, MathUtils, SRGBColorSpace } from 'three';
+import {
+	Color,
+	DataTexture,
+	FloatType,
+	RGBAFormat,
+	NearestFilter,
+	LinearSRGBColorSpace,
+	WebGLRenderTarget,
+	ShaderMaterial,
+	PlaneGeometry,
+	Mesh,
+	Scene,
+	OrthographicCamera,
+	CanvasTexture,
+	LinearFilter,
+	MathUtils,
+	GLSL3,
+	Vector4,
+} from 'three';
+
+const _clearColor = new Color();
 import { RegionImageSource } from '../../../../src/three/plugins/images/sources/RegionImageSource.js';
 import { ProjectionScheme } from '../../../../src/three/plugins/images/utils/ProjectionScheme.js';
+import { TILE_SDF_VERTEX, TILE_SDF_FRAGMENT } from './TileSdfShader.js';
 
 const DEG2RAD = MathUtils.DEG2RAD;
 const RAD2DEG = MathUtils.RAD2DEG;
+
+const LABEL_ATLAS_SIZE = 2048;
 
 export class PlotImageSource extends RegionImageSource {
 
@@ -25,18 +47,38 @@ export class PlotImageSource extends RegionImageSource {
 		super();
 		this.resolution = options.resolution || 512;
 		this.projection = new ProjectionScheme();
-
-		/** 所有标绘图形 Map<id, PlotBase> — 由 GroundDecalManager 注入 */
 		this.shapes = new Map();
-
-		/** 所有图形的总包围盒 [minLon, minLat, maxLon, maxLat]（度） */
 		this.contentBounds = null;
+
+		this._renderer = options.renderer || null;
+		this._rt = null;
+		this._sdfScene = null;
+		this._sdfCamera = null;
+		this._sdfMaterial = null;
+		this._gpuReady = false;
+
+		// 标签 atlas
+		this._labelCanvas = document.createElement( 'canvas' );
+		this._labelCanvas.width = LABEL_ATLAS_SIZE;
+		this._labelCanvas.height = LABEL_ATLAS_SIZE;
+		this._labelAtlasTex = new CanvasTexture( this._labelCanvas );
+		this._labelAtlasTex.flipY = false;
+		this._labelAtlasTex.minFilter = LinearFilter;
+		this._labelAtlasTex.magFilter = LinearFilter;
+		this._labelTiles = new Map();
 
 	}
 
 	async init() {
 
 		this._updateBounds();
+		this._initGPU();
+
+	}
+
+	setRenderer( renderer ) {
+
+		this._renderer = renderer;
 
 	}
 
@@ -57,38 +99,331 @@ export class PlotImageSource extends RegionImageSource {
 
 	async fetchItem( tokens ) {
 
-		const canvas = document.createElement( 'canvas' );
-		const tex = new CanvasTexture( canvas );
-		tex.colorSpace = SRGBColorSpace;
-		tex.generateMipmaps = false;
+		if ( ! this._gpuReady ) this._initGPU();
 
-		this._drawToCanvas( canvas, tokens );
-		tex.needsUpdate = true;
+		const [ minX, minY, maxX, maxY ] = tokens;
+		const { projection, resolution } = this;
 
+		const minLonDeg = projection.convertNormalizedToLongitude( minX ) * RAD2DEG;
+		const minLatDeg = projection.convertNormalizedToLatitude( minY ) * RAD2DEG;
+		const maxLonDeg = projection.convertNormalizedToLongitude( maxX ) * RAD2DEG;
+		const maxLatDeg = projection.convertNormalizedToLatitude( maxY ) * RAD2DEG;
+		const tileBounds = [ minLonDeg, minLatDeg, maxLonDeg, maxLatDeg ];
+
+		const shapeDataTex = this._buildShapeDataForTile( tileBounds );
+		if ( ! shapeDataTex ) return this._createEmptyTexture();
+
+		const u = this._sdfMaterial.uniforms;
+		u.uTileBounds.value.set( minLonDeg, minLatDeg, maxLonDeg, maxLatDeg );
+		u.uResolution.value = resolution;
+		u.tShapeData.value = shapeDataTex;
+		u.tLabelAtlas.value = this._labelAtlasTex;
+
+		// 每个瓦片独立的 RT → 返回其 texture 避免 readPixels 拷贝
+		const rt = new WebGLRenderTarget( resolution, resolution, {
+			depthBuffer: false,
+			stencilBuffer: false,
+		} );
+
+		const renderer = this._renderer;
+		const prevRT = renderer.getRenderTarget();
+		const prevClear = renderer.getClearColor( _clearColor );
+		const prevAlpha = renderer.getClearAlpha();
+
+		renderer.setRenderTarget( rt );
+		renderer.setClearColor( 0x000000, 0 );
+		renderer.clear();
+		renderer.render( this._sdfScene, this._sdfCamera );
+
+		renderer.setClearColor( prevClear, prevAlpha );
+		renderer.setRenderTarget( prevRT );
+
+		shapeDataTex.dispose();
+
+		const tex = rt.texture;
+		tex._parentRT = rt;
 		return tex;
 
 	}
 
 	disposeItem( texture ) {
 
-		texture.dispose();
+		if ( texture._parentRT ) {
+
+			texture._parentRT.dispose();
+
+		} else {
+
+			texture.dispose();
+
+		}
 
 	}
 
-	/** 数据变化后调用：重算包围盒 + 重绘所有已缓存的瓦片纹理 */
+	_createEmptyTexture() {
+
+		const data = new Uint8Array( 4 );
+		const tex = new DataTexture( data, 1, 1 );
+		tex.needsUpdate = true;
+		return tex;
+
+	}
+
 	redraw() {
 
 		this._updateBounds();
-		this.forEachItem( ( tex, args ) => {
+		this._buildLabelAtlas();
 
-			this._drawToCanvas( tex.image, args );
-			tex.needsUpdate = true;
-
-		} );
+		// 清除缓存，强制 plugin 重新请求所有瓦片纹理
+		this.dispose();
 
 	}
 
-	/** 重算所有图形的总包围盒 */
+	// ═══════════════════════════════════════════
+	// GPU 初始化
+	// ═══════════════════════════════════════════
+
+	_initGPU() {
+
+		if ( ! this._renderer ) return;
+
+		const res = this.resolution;
+
+		this._sdfMaterial = new ShaderMaterial( {
+			glslVersion: GLSL3,
+			uniforms: {
+				uTileBounds: { value: new Vector4() },
+				uResolution: { value: res },
+				tShapeData: { value: null },
+				tLabelAtlas: { value: this._labelAtlasTex },
+			},
+			vertexShader: TILE_SDF_VERTEX,
+			fragmentShader: TILE_SDF_FRAGMENT,
+			depthWrite: false,
+			depthTest: false,
+			transparent: true,
+		} );
+
+		const quad = new Mesh( new PlaneGeometry( 2, 2 ), this._sdfMaterial );
+		this._sdfCamera = new OrthographicCamera( - 1, 1, 1, - 1, 0, 1 );
+		this._sdfScene = new Scene();
+		this._sdfScene.add( quad );
+
+		this._gpuReady = true;
+
+	}
+
+	// ═══════════════════════════════════════════
+	// 图形数据打包
+	// ═══════════════════════════════════════════
+
+	_buildShapeDataForTile( tileBounds ) {
+
+		const midLat = ( tileBounds[ 1 ] + tileBounds[ 3 ] ) / 2;
+		const metersPerDegLon = 111320 * Math.cos( midLat * DEG2RAD );
+		const metersPerDegLat = 111320;
+
+		const pxDeg = ( tileBounds[ 2 ] - tileBounds[ 0 ] ) / this.resolution;
+
+		let shapeCount = 0;
+		const arr = [ 0 ];
+
+		for ( const [ id, shape ] of this.shapes ) {
+
+			const opts = shape.options;
+			if ( opts.visible === false ) continue;
+
+			const shapeBounds = this._getShapeBounds( shape );
+			if ( ! shapeBounds || ! _boundsIntersect( shapeBounds, tileBounds ) ) continue;
+
+			const fill = _parseColor( opts.fillColor );
+			const stroke = _parseColor( opts.strokeColor );
+
+			const fillOp = opts.fillOpacity !== undefined ? opts.fillOpacity / 100 : 1;
+			const strokeOp = opts.strokeOpacity !== undefined ? opts.strokeOpacity / 100 : 1;
+			fill[ 3 ] *= fillOp;
+			stroke[ 3 ] *= strokeOp;
+
+			const swDeg = ( opts.strokeWidth || 0 ) * pxDeg;
+			const op = 1.0;
+			const pts = opts.points || [];
+			const cat = shape.category;
+
+			if ( cat === 'point' ) {
+
+				if ( pts.length === 0 ) continue;
+				const hsLon = ( opts.size || 0 ) / 2 / metersPerDegLon;
+				const hsLat = ( opts.size || 0 ) / 2 / metersPerDegLat;
+				const ps = opts.pointStyle === 'square' ? 1 : 0;
+				arr.push( 6, 17, ...fill, ...stroke, swDeg, op, pts[ 0 ][ 0 ], pts[ 0 ][ 1 ], hsLon, hsLat, ps );
+				shapeCount ++;
+
+			} else if ( cat === 'line' ) {
+
+				const vc = pts.length;
+				if ( vc < 2 ) continue;
+				const hwDeg = ( opts.strokeWidth || 3 ) * pxDeg / 2;
+				const sa = _arrowInt( opts.startArrowStyle );
+				const ea = _arrowInt( opts.endArrowStyle );
+				const aszDeg = ( opts.arrowSize || 0 ) * pxDeg;
+				const total = 17 + vc * 2;
+
+				const lineColor = _parseColor( opts.strokeColor || opts.fillColor || '#ffffff' );
+				lineColor[ 3 ] *= strokeOp;
+
+				arr.push( 3, total, lineColor[ 0 ], lineColor[ 1 ], lineColor[ 2 ], lineColor[ 3 ], 0, 0, 0, 0, 0, op, vc, hwDeg, sa, ea, aszDeg );
+				for ( const c of pts ) arr.push( c[ 0 ], c[ 1 ] );
+				shapeCount ++;
+
+			} else if ( cat === 'polygon' ) {
+
+				const vc = pts.length;
+				if ( vc < 3 ) continue;
+				const total = 13 + vc * 2;
+				arr.push( 2, total, ...fill, ...stroke, swDeg, op, vc );
+				for ( const c of pts ) arr.push( c[ 0 ], c[ 1 ] );
+				shapeCount ++;
+
+			} else if ( cat === 'rectangle' ) {
+
+				if ( pts.length === 0 ) continue;
+				const hwDeg = ( opts.width || 0 ) / 2 / metersPerDegLon;
+				const hhDeg = ( opts.height || 0 ) / 2 / metersPerDegLat;
+				arr.push( 0, 16, ...fill, ...stroke, swDeg, op, pts[ 0 ][ 0 ], pts[ 0 ][ 1 ], hwDeg, hhDeg );
+				shapeCount ++;
+
+			} else if ( cat === 'circle' ) {
+
+				if ( pts.length === 0 ) continue;
+				const rLon = ( opts.radius || 0 ) / metersPerDegLon;
+				const rLat = ( opts.radius || 0 ) / metersPerDegLat;
+				arr.push( 1, 16, ...fill, ...stroke, swDeg, op, pts[ 0 ][ 0 ], pts[ 0 ][ 1 ], rLon, rLat );
+				shapeCount ++;
+
+			} else if ( cat === 'sector' ) {
+
+				if ( pts.length === 0 ) continue;
+				const rLon = ( opts.radius || 0 ) / metersPerDegLon;
+				const rLat = ( opts.radius || 0 ) / metersPerDegLat;
+				arr.push( 5, 18, ...fill, ...stroke, swDeg, op,
+					pts[ 0 ][ 0 ], pts[ 0 ][ 1 ], rLon, rLat,
+					( opts.startAngle || 0 ) * DEG2RAD,
+					( opts.sectorAngle || 0 ) * DEG2RAD );
+				shapeCount ++;
+
+			} else if ( cat === 'text' ) {
+
+				if ( pts.length === 0 ) continue;
+				const tile = this._labelTiles.get( id );
+				if ( ! tile ) continue;
+				arr.push( 4, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, op,
+					pts[ 0 ][ 0 ], pts[ 0 ][ 1 ], tile.halfWDeg, tile.halfHDeg,
+					tile.u0, tile.v0, tile.u1, tile.v1 );
+				shapeCount ++;
+
+			} else if ( cat === 'arrow' ) {
+
+				const verts = shape.generateCoords();
+				const vc = verts.length;
+				if ( vc < 3 ) continue;
+				const total = 13 + vc * 2;
+				arr.push( 2, total, ...fill, ...stroke, swDeg, op, vc );
+				for ( const c of verts ) arr.push( c[ 0 ], c[ 1 ] );
+				shapeCount ++;
+
+			}
+
+		}
+
+		arr[ 0 ] = shapeCount;
+
+		const data = new Float32Array( arr );
+		const texWidth = Math.ceil( data.length / 4 );
+		const padded = new Float32Array( texWidth * 4 );
+		padded.set( data );
+
+		const tex = new DataTexture( padded, texWidth, 1, RGBAFormat, FloatType );
+		tex.minFilter = NearestFilter;
+		tex.magFilter = NearestFilter;
+		tex.colorSpace = LinearSRGBColorSpace;
+		tex.needsUpdate = true;
+		return tex;
+
+	}
+
+	// ═══════════════════════════════════════════
+	// 标签 atlas
+	// ═══════════════════════════════════════════
+
+	_buildLabelAtlas() {
+
+		this._labelTiles.clear();
+		const ctx = this._labelCanvas.getContext( '2d' );
+		ctx.clearRect( 0, 0, LABEL_ATLAS_SIZE, LABEL_ATLAS_SIZE );
+
+		let cursorX = 0, cursorY = 0, rowH = 0;
+		const LABEL_M_PER_PX = 10;
+
+		for ( const [ id, shape ] of this.shapes ) {
+
+			if ( shape.category !== 'text' ) continue;
+			const opts = shape.options;
+
+			const fontSize = opts.fontSize || 48;
+			const font = fontSize + 'px sans-serif';
+			const pad = ( opts.strokeWidth || 4 ) + 6;
+
+			ctx.font = font;
+			const metrics = ctx.measureText( opts.content || '' );
+			const tw = Math.ceil( metrics.width + pad * 2 );
+			const th = Math.ceil( fontSize * 1.4 + pad * 2 );
+
+			if ( cursorX + tw > LABEL_ATLAS_SIZE ) { cursorX = 0; cursorY += rowH; rowH = 0; }
+			if ( cursorY + th > LABEL_ATLAS_SIZE ) break;
+
+			const tx = cursorX, ty = cursorY;
+			const cx = tx + tw / 2, cy = ty + th / 2;
+
+			ctx.font = font;
+			ctx.textAlign = opts.textAlign || 'center';
+			ctx.textBaseline = 'middle';
+
+			if ( opts.strokeColor && ( opts.strokeWidth || 0 ) > 0 ) {
+
+				ctx.strokeStyle = opts.strokeColor;
+				ctx.lineWidth = opts.strokeWidth || 4;
+				ctx.strokeText( opts.content || '', cx, cy );
+
+			}
+
+			ctx.fillStyle = opts.fontColor || opts.fillColor || '#ffffff';
+			ctx.globalAlpha = 1;
+			ctx.fillText( opts.content || '', cx, cy );
+
+			const cLat = ( opts.points && opts.points[ 0 ] ) ? opts.points[ 0 ][ 1 ] : 0;
+			const metersPerDegLon = 111320 * Math.cos( cLat * DEG2RAD );
+			const metersPerDegLat = 111320;
+
+			this._labelTiles.set( id, {
+				halfWDeg: tw * LABEL_M_PER_PX / metersPerDegLon / 2,
+				halfHDeg: th * LABEL_M_PER_PX / metersPerDegLat / 2,
+				u0: tx / LABEL_ATLAS_SIZE, v0: ty / LABEL_ATLAS_SIZE,
+				u1: ( tx + tw ) / LABEL_ATLAS_SIZE, v1: ( ty + th ) / LABEL_ATLAS_SIZE,
+			} );
+
+			cursorX += tw;
+			if ( th > rowH ) rowH = th;
+
+		}
+
+		this._labelAtlasTex.needsUpdate = true;
+
+	}
+
+	// ═══════════════════════════════════════════
+	// 包围盒
+	// ═══════════════════════════════════════════
+
 	_updateBounds() {
 
 		let minLon = Infinity, minLat = Infinity;
@@ -98,130 +433,23 @@ export class PlotImageSource extends RegionImageSource {
 		for ( const shape of this.shapes.values() ) {
 
 			if ( shape.options.visible === false ) continue;
-			const pts = shape.options.points;
-			if ( ! pts ) continue;
+			const bounds = this._getShapeBounds( shape );
+			if ( ! bounds ) continue;
 
-			for ( const [ lon, lat ] of pts ) {
-
-				minLon = Math.min( minLon, lon );
-				maxLon = Math.max( maxLon, lon );
-				minLat = Math.min( minLat, lat );
-				maxLat = Math.max( maxLat, lat );
-				hasAny = true;
-
-			}
-
-			// 扩展半径/尺寸类图形的包围盒
-			const cat = shape.category;
-			if ( cat === 'circle' || cat === 'sector' ) {
-
-				const r = shape.options.radius || 0;
-				const cLat = pts[ 0 ][ 1 ];
-				const dLon = r / ( 111320 * Math.cos( cLat * DEG2RAD ) );
-				const dLat = r / 111320;
-				minLon = Math.min( minLon, pts[ 0 ][ 0 ] - dLon );
-				maxLon = Math.max( maxLon, pts[ 0 ][ 0 ] + dLon );
-				minLat = Math.min( minLat, pts[ 0 ][ 1 ] - dLat );
-				maxLat = Math.max( maxLat, pts[ 0 ][ 1 ] + dLat );
-
-			} else if ( cat === 'rectangle' ) {
-
-				const w = ( shape.options.width || 0 ) / 2;
-				const h = ( shape.options.height || 0 ) / 2;
-				const cLat = pts[ 0 ][ 1 ];
-				const dLon = w / ( 111320 * Math.cos( cLat * DEG2RAD ) );
-				const dLat = h / 111320;
-				minLon = Math.min( minLon, pts[ 0 ][ 0 ] - dLon );
-				maxLon = Math.max( maxLon, pts[ 0 ][ 0 ] + dLon );
-				minLat = Math.min( minLat, pts[ 0 ][ 1 ] - dLat );
-				maxLat = Math.max( maxLat, pts[ 0 ][ 1 ] + dLat );
-
-			} else if ( cat === 'point' ) {
-
-				const sz = ( shape.options.size || 0 ) / 2;
-				const cLat = pts[ 0 ][ 1 ];
-				const dLon = sz / ( 111320 * Math.cos( cLat * DEG2RAD ) );
-				const dLat = sz / 111320;
-				minLon = Math.min( minLon, pts[ 0 ][ 0 ] - dLon );
-				maxLon = Math.max( maxLon, pts[ 0 ][ 0 ] + dLon );
-				minLat = Math.min( minLat, pts[ 0 ][ 1 ] - dLat );
-				maxLat = Math.max( maxLat, pts[ 0 ][ 1 ] + dLat );
-
-			} else if ( cat === 'text' ) {
-
-				const fontSize = shape.options.fontSize || 48;
-				const content = shape.options.content || '';
-				const textH = fontSize * 10;
-				const textW = textH * content.length * 0.7;
-				const cLat = pts[ 0 ][ 1 ];
-				const dLon = textW / ( 111320 * Math.cos( cLat * DEG2RAD ) );
-				const dLat = textH / 111320;
-				minLon = Math.min( minLon, pts[ 0 ][ 0 ] - dLon );
-				maxLon = Math.max( maxLon, pts[ 0 ][ 0 ] + dLon );
-				minLat = Math.min( minLat, pts[ 0 ][ 1 ] - dLat );
-				maxLat = Math.max( maxLat, pts[ 0 ][ 1 ] + dLat );
-
-			}
+			minLon = Math.min( minLon, bounds[ 0 ] );
+			minLat = Math.min( minLat, bounds[ 1 ] );
+			maxLon = Math.max( maxLon, bounds[ 2 ] );
+			maxLat = Math.max( maxLat, bounds[ 3 ] );
+			hasAny = true;
 
 		}
 
 		this.contentBounds = hasAny ? [ minLon, minLat, maxLon, maxLat ] : null;
 
-	}
-
-	/**
-	 * 将所有与该瓦片相交的图形渲染到 canvas 上。
-	 * tokens = [minX, minY, maxX, maxY]（normalized projection 坐标，弧度）
-	 */
-	_drawToCanvas( canvas, tokens ) {
-
-		const [ minX, minY, maxX, maxY ] = tokens;
-		const { projection, resolution } = this;
-
-		canvas.width = resolution;
-		canvas.height = resolution;
-
-		const minLonDeg = projection.convertNormalizedToLongitude( minX ) * RAD2DEG;
-		const minLatDeg = projection.convertNormalizedToLatitude( minY ) * RAD2DEG;
-		const maxLonDeg = projection.convertNormalizedToLongitude( maxX ) * RAD2DEG;
-		const maxLatDeg = projection.convertNormalizedToLatitude( maxY ) * RAD2DEG;
-		const tileBounds = [ minLonDeg, minLatDeg, maxLonDeg, maxLatDeg ];
-
-		const w = resolution, h = resolution;
-		const ctx = canvas.getContext( '2d' );
-		ctx.clearRect( 0, 0, w, h );
-
-		// 米→像素转换系数
-		const midLat = ( minLatDeg + maxLatDeg ) / 2;
-		const metersPerDegLon = 111320 * Math.cos( midLat * DEG2RAD );
-		const metersPerDegLat = 111320;
-		const pxPerDegLon = w / ( maxLonDeg - minLonDeg );
-		const pxPerDegLat = h / ( maxLatDeg - minLatDeg );
-		const pxPerMeterLon = pxPerDegLon / metersPerDegLon;
-		const pxPerMeterLat = pxPerDegLat / metersPerDegLat;
-
-		const projectPoint = ( lon, lat ) => {
-
-			const x = MathUtils.mapLinear( lon, minLonDeg, maxLonDeg, 0, w );
-			const y = h - MathUtils.mapLinear( lat, minLatDeg, maxLatDeg, 0, h );
-			return [ x, y ];
-
-		};
-
-		for ( const shape of this.shapes.values() ) {
-
-			if ( shape.options.visible === false ) continue;
-
-			const shapeBounds = this._getShapeBounds( shape );
-			if ( ! shapeBounds || ! _boundsIntersect( shapeBounds, tileBounds ) ) continue;
-
-			this._drawShape( ctx, shape, projectPoint, pxPerMeterLon, pxPerMeterLat, w, h );
-
-		}
+		this._buildLabelAtlas();
 
 	}
 
-	/** 获取图形的地理包围盒 [minLon, minLat, maxLon, maxLat]（度） */
 	_getShapeBounds( shape ) {
 
 		const pts = shape.options.points;
@@ -265,7 +493,6 @@ export class PlotImageSource extends RegionImageSource {
 
 		} else if ( cat === 'text' ) {
 
-			// 文字地理尺寸：fontSize * 10 米高，宽度按字符数估算
 			const fontSize = shape.options.fontSize || 48;
 			const content = shape.options.content || '';
 			const textH = fontSize * 10;
@@ -277,7 +504,6 @@ export class PlotImageSource extends RegionImageSource {
 
 		}
 
-		// 额外填充 strokeWidth（粗略估算）
 		const sw = shape.options.strokeWidth || 0;
 		if ( sw > 0 ) {
 
@@ -291,306 +517,37 @@ export class PlotImageSource extends RegionImageSource {
 
 	}
 
-	/** Canvas 2D 绘制单个图形 */
-	_drawShape( ctx, shape, projectPoint, pxPerMeterLon, pxPerMeterLat, w, h ) {
+}
 
-		const opts = shape.options;
-		const cat = shape.category;
-		const pts = opts.points;
+// ═══════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════
 
-		ctx.save();
+function _parseColor( color ) {
 
-		// 通用样式
-		const fillColor = opts.fillColor || 'transparent';
-		const strokeColor = opts.strokeColor || 'transparent';
-		const fillOpacity = ( opts.fillOpacity !== undefined ? opts.fillOpacity / 100 : 1 );
-		const strokeOpacity = ( opts.strokeOpacity !== undefined ? opts.strokeOpacity / 100 : 1 );
-		const strokeWidth = opts.strokeWidth || 0;
+	if ( ! color || color === 'transparent' ) return [ 0, 0, 0, 0 ];
 
-		if ( cat === 'point' ) {
+	if ( typeof color === 'string' && color.startsWith( '#' ) ) {
 
-			const [ cx, cy ] = projectPoint( pts[ 0 ][ 0 ], pts[ 0 ][ 1 ] );
-			const halfSize = ( opts.size || 0 ) / 2;
-			const rPx = halfSize * pxPerMeterLon;
-
-			if ( opts.pointStyle === 'square' ) {
-
-				ctx.globalAlpha = fillOpacity;
-				ctx.fillStyle = fillColor;
-				ctx.fillRect( cx - rPx, cy - rPx, rPx * 2, rPx * 2 );
-				if ( strokeWidth > 0 ) {
-
-					ctx.globalAlpha = strokeOpacity;
-					ctx.strokeStyle = strokeColor;
-					ctx.lineWidth = strokeWidth;
-					ctx.strokeRect( cx - rPx, cy - rPx, rPx * 2, rPx * 2 );
-
-				}
-
-			} else {
-
-				ctx.beginPath();
-				ctx.ellipse( cx, cy, rPx, halfSize * pxPerMeterLat, 0, 0, Math.PI * 2 );
-				ctx.globalAlpha = fillOpacity;
-				ctx.fillStyle = fillColor;
-				ctx.fill();
-				if ( strokeWidth > 0 ) {
-
-					ctx.globalAlpha = strokeOpacity;
-					ctx.strokeStyle = strokeColor;
-					ctx.lineWidth = strokeWidth;
-					ctx.stroke();
-
-				}
-
-			}
-
-		} else if ( cat === 'line' ) {
-
-			if ( pts.length < 2 ) {
-
-				ctx.restore(); return;
-
-			}
-
-			const projected = pts.map( p => projectPoint( p[ 0 ], p[ 1 ] ) );
-
-			ctx.beginPath();
-			for ( let i = 0; i < projected.length; i ++ ) {
-
-				if ( i === 0 ) ctx.moveTo( projected[ i ][ 0 ], projected[ i ][ 1 ] );
-				else ctx.lineTo( projected[ i ][ 0 ], projected[ i ][ 1 ] );
-
-			}
-
-			ctx.globalAlpha = strokeOpacity;
-			ctx.strokeStyle = strokeColor;
-			ctx.lineWidth = strokeWidth || 2;
-			ctx.lineCap = 'round';
-			ctx.lineJoin = 'round';
-			ctx.stroke();
-
-			// 端点箭头
-			const arrowSize = ( opts.arrowSize || 15 ) * 1.5;
-			const startStyle = opts.startArrowStyle;
-			const endStyle = opts.endArrowStyle;
-
-			if ( startStyle ) {
-
-				const p0 = projected[ 0 ], p1 = projected[ 1 ];
-				const angle = Math.atan2( p0[ 1 ] - p1[ 1 ], p0[ 0 ] - p1[ 0 ] );
-				_drawArrowHead( ctx, p0[ 0 ], p0[ 1 ], angle, arrowSize, startStyle, strokeColor, strokeOpacity, strokeWidth );
-
-			}
-
-			if ( endStyle ) {
-
-				const pL = projected[ projected.length - 1 ], pP = projected[ projected.length - 2 ];
-				const angle = Math.atan2( pL[ 1 ] - pP[ 1 ], pL[ 0 ] - pP[ 0 ] );
-				_drawArrowHead( ctx, pL[ 0 ], pL[ 1 ], angle, arrowSize, endStyle, strokeColor, strokeOpacity, strokeWidth );
-
-			}
-
-		} else if ( cat === 'polygon' || cat === 'arrow' ) {
-
-			let verts = pts;
-			if ( cat === 'arrow' ) {
-
-				verts = shape.generateCoords();
-				if ( verts.length < 3 ) {
-
-					ctx.restore(); return;
-
-				}
-
-			}
-
-			if ( verts.length < 3 ) {
-
-				ctx.restore(); return;
-
-			}
-
-			ctx.beginPath();
-			for ( let i = 0; i < verts.length; i ++ ) {
-
-				const [ px, py ] = projectPoint( verts[ i ][ 0 ], verts[ i ][ 1 ] );
-				if ( i === 0 ) ctx.moveTo( px, py );
-				else ctx.lineTo( px, py );
-
-			}
-
-			ctx.closePath();
-			ctx.globalAlpha = fillOpacity;
-			ctx.fillStyle = fillColor;
-			ctx.fill( 'evenodd' );
-			if ( strokeWidth > 0 ) {
-
-				ctx.globalAlpha = strokeOpacity;
-				ctx.strokeStyle = strokeColor;
-				ctx.lineWidth = strokeWidth;
-				ctx.stroke();
-
-			}
-
-		} else if ( cat === 'rectangle' ) {
-
-			const [ cx, cy ] = projectPoint( pts[ 0 ][ 0 ], pts[ 0 ][ 1 ] );
-			const hw = ( opts.width || 0 ) / 2 * pxPerMeterLon;
-			const hh = ( opts.height || 0 ) / 2 * pxPerMeterLat;
-
-			ctx.globalAlpha = fillOpacity;
-			ctx.fillStyle = fillColor;
-			ctx.fillRect( cx - hw, cy - hh, hw * 2, hh * 2 );
-			if ( strokeWidth > 0 ) {
-
-				ctx.globalAlpha = strokeOpacity;
-				ctx.strokeStyle = strokeColor;
-				ctx.lineWidth = strokeWidth;
-				ctx.strokeRect( cx - hw, cy - hh, hw * 2, hh * 2 );
-
-			}
-
-		} else if ( cat === 'circle' ) {
-
-			const [ cx, cy ] = projectPoint( pts[ 0 ][ 0 ], pts[ 0 ][ 1 ] );
-			const r = opts.radius || 0;
-			const rPxLon = r * pxPerMeterLon;
-			const rPxLat = r * pxPerMeterLat;
-
-			ctx.beginPath();
-			ctx.ellipse( cx, cy, rPxLon, rPxLat, 0, 0, Math.PI * 2 );
-			ctx.globalAlpha = fillOpacity;
-			ctx.fillStyle = fillColor;
-			ctx.fill();
-			if ( strokeWidth > 0 ) {
-
-				ctx.globalAlpha = strokeOpacity;
-				ctx.strokeStyle = strokeColor;
-				ctx.lineWidth = strokeWidth;
-				ctx.stroke();
-
-			}
-
-		} else if ( cat === 'sector' ) {
-
-			const [ cx, cy ] = projectPoint( pts[ 0 ][ 0 ], pts[ 0 ][ 1 ] );
-			const r = opts.radius || 0;
-			const rPx = r * pxPerMeterLon;
-			const startAngle = - ( opts.startAngle || 0 ) * DEG2RAD;
-			const sectorAngle = - ( opts.sectorAngle || 0 ) * DEG2RAD;
-
-			ctx.beginPath();
-			ctx.moveTo( cx, cy );
-			ctx.arc( cx, cy, rPx, startAngle, startAngle + sectorAngle, sectorAngle < 0 );
-			ctx.closePath();
-			ctx.globalAlpha = fillOpacity;
-			ctx.fillStyle = fillColor;
-			ctx.fill();
-			if ( strokeWidth > 0 ) {
-
-				ctx.globalAlpha = strokeOpacity;
-				ctx.strokeStyle = strokeColor;
-				ctx.lineWidth = strokeWidth;
-				ctx.stroke();
-
-			}
-
-		} else if ( cat === 'text' ) {
-
-			const [ cx, cy ] = projectPoint( pts[ 0 ][ 0 ], pts[ 0 ][ 1 ] );
-			const fontSize = opts.fontSize || 48;
-			const content = opts.content || '';
-
-			// 将 fontSize 转为地理固定大小：fontSize * 10 米
-			const fontPx = Math.max( fontSize * 10 * pxPerMeterLat, 1 );
-			const font = fontPx + 'px sans-serif';
-
-			ctx.font = font;
-			ctx.textAlign = opts.textAlign || 'center';
-			ctx.textBaseline = 'middle';
-
-			// 描边宽度也按比例缩放
-			const textStrokeW = Math.max( strokeWidth * 10 * pxPerMeterLat, 1 );
-
-			if ( opts.strokeColor && strokeWidth > 0 ) {
-
-				ctx.globalAlpha = strokeOpacity;
-				ctx.strokeStyle = strokeColor;
-				ctx.lineWidth = textStrokeW;
-				ctx.strokeText( content, cx, cy );
-
-			}
-
-			ctx.globalAlpha = fillOpacity;
-			ctx.fillStyle = opts.fontColor || fillColor || '#ffffff';
-			ctx.fillText( content, cx, cy );
-
-		}
-
-		ctx.restore();
+		let hex = color.slice( 1 );
+		if ( hex.length === 3 ) hex = hex[ 0 ] + hex[ 0 ] + hex[ 1 ] + hex[ 1 ] + hex[ 2 ] + hex[ 2 ];
+		return [
+			parseInt( hex.slice( 0, 2 ), 16 ) / 255,
+			parseInt( hex.slice( 2, 4 ), 16 ) / 255,
+			parseInt( hex.slice( 4, 6 ), 16 ) / 255,
+			1.0,
+		];
 
 	}
+
+	return [ 1, 1, 1, 1 ];
 
 }
 
-/**
- * 在指定位置绘制箭头头部。
- * style: 'filled', 'open', 'filledDiamond', 'openDiamond', 'filledCircle', 'openCircle', 'bar'
- */
-function _drawArrowHead( ctx, x, y, angle, size, style, color, opacity, lineWidth ) {
+function _arrowInt( style ) {
 
-	ctx.save();
-	ctx.translate( x, y );
-	ctx.rotate( angle );
-	ctx.globalAlpha = opacity;
-	ctx.fillStyle = color;
-	ctx.strokeStyle = color;
-	ctx.lineWidth = lineWidth || 1;
-
-	const w = size * 0.45;
-
-	if ( style === 'filled' || style === 'open' ) {
-
-		ctx.beginPath();
-		ctx.moveTo( size, 0 );
-		ctx.lineTo( 0, w );
-		ctx.lineTo( 0, - w );
-		ctx.closePath();
-		if ( style === 'filled' ) ctx.fill();
-		else ctx.stroke();
-
-	} else if ( style === 'filledDiamond' || style === 'openDiamond' ) {
-
-		const hs = size * 0.5;
-		ctx.beginPath();
-		ctx.moveTo( size, 0 );
-		ctx.lineTo( hs, w );
-		ctx.lineTo( 0, 0 );
-		ctx.lineTo( hs, - w );
-		ctx.closePath();
-		if ( style === 'filledDiamond' ) ctx.fill();
-		else ctx.stroke();
-
-	} else if ( style === 'filledCircle' || style === 'openCircle' ) {
-
-		const r = size * 0.35;
-		ctx.beginPath();
-		ctx.arc( 0, 0, r, 0, Math.PI * 2 );
-		if ( style === 'filledCircle' ) ctx.fill();
-		else ctx.stroke();
-
-	} else if ( style === 'bar' ) {
-
-		ctx.beginPath();
-		ctx.moveTo( 0, - w );
-		ctx.lineTo( 0, w );
-		ctx.lineWidth = Math.max( lineWidth, 2 );
-		ctx.stroke();
-
-	}
-
-	ctx.restore();
+	if ( ! style ) return 0;
+	return { 'filled': 1, 'open': 2, 'filledDiamond': 3, 'openDiamond': 4, 'filledCircle': 5, 'openCircle': 6, 'bar': 7 }[ style ] || 0;
 
 }
 

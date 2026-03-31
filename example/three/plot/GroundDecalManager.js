@@ -32,6 +32,7 @@ export class GroundDecalManager {
 		this._items = new Map();
 		this._overlay = new PlotOverlay( options );
 		this._overlay.imageSource.shapes = this._items;
+		if ( options.renderer ) this._overlay.imageSource.setRenderer( options.renderer );
 		this._redrawTimer = null;
 
 	}
