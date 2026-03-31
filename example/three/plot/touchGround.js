@@ -19,7 +19,17 @@ import { GroundDecalManager } from './GroundDecalManager.js';
 
 let camera, controls, scene, renderer, tiles, imageryOverlay;
 let decals;
-let pointId, lineId, polygonId, rectId, sectorId, circleId, textId, arrowId;
+
+const shapeIds = {
+	pointId: null,
+	lineId: null,
+	polygonId: null,
+	rectId: null,
+	sectorId: null,
+	circleId: null,
+	textId: null,
+	arrowId: null,
+};
 
 const apiKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1MDA4MTA3YS1mZDNmLTQyYzMtYjg3Ny1jN2EzNWNkNzBhNzYiLCJpZCI6MTE0MDgzLCJpYXQiOjE3NzA0NTY5NjZ9.ky7zHUKW9YVxb1LB6jW0PLdv0I9pPIFDdytlLcPUb-Y';
 
@@ -173,7 +183,8 @@ function reinstantiateTiles() {
 
 function applyPoint() {
 
-	decals.setStyle( pointId, {
+	if ( shapeIds.pointId == null ) return;
+	decals.setStyle( shapeIds.pointId, {
 		fillColor: S.pointFillColor,
 		fillOpacity: S.pointFillOpacity,
 		strokeColor: S.pointStrokeColor,
@@ -188,7 +199,8 @@ function applyPoint() {
 
 function applyLine() {
 
-	decals.setStyle( lineId, {
+	if ( shapeIds.lineId == null ) return;
+	decals.setStyle( shapeIds.lineId, {
 		strokeColor: S.lineStrokeColor,
 		strokeWidth: S.lineStrokeWidth,
 		strokeOpacity: S.lineStrokeOpacity,
@@ -202,7 +214,8 @@ function applyLine() {
 
 function applyPoly() {
 
-	decals.setStyle( polygonId, {
+	if ( shapeIds.polygonId == null ) return;
+	decals.setStyle( shapeIds.polygonId, {
 		fillColor: S.polyFillColor,
 		fillOpacity: S.polyFillOpacity,
 		strokeColor: S.polyStrokeColor,
@@ -215,7 +228,8 @@ function applyPoly() {
 
 function applyRect() {
 
-	decals.setStyle( rectId, {
+	if ( shapeIds.rectId == null ) return;
+	decals.setStyle( shapeIds.rectId, {
 		fillColor: S.rectFillColor,
 		fillOpacity: S.rectFillOpacity,
 		strokeColor: S.rectStrokeColor,
@@ -228,7 +242,8 @@ function applyRect() {
 
 function applySector() {
 
-	decals.setStyle( sectorId, {
+	if ( shapeIds.sectorId == null ) return;
+	decals.setStyle( shapeIds.sectorId, {
 		fillColor: S.sectorFillColor,
 		fillOpacity: S.sectorFillOpacity,
 		strokeColor: S.sectorStrokeColor,
@@ -244,7 +259,8 @@ function applySector() {
 
 function applyCircle() {
 
-	decals.setStyle( circleId, {
+	if ( shapeIds.circleId == null ) return;
+	decals.setStyle( shapeIds.circleId, {
 		fillColor: S.circleFillColor,
 		fillOpacity: S.circleFillOpacity,
 		strokeColor: S.circleStrokeColor,
@@ -257,7 +273,8 @@ function applyCircle() {
 
 function applyText() {
 
-	decals.setStyle( textId, {
+	if ( shapeIds.textId == null ) return;
+	decals.setStyle( shapeIds.textId, {
 		content: S.textContent,
 		fontColor: S.textFontColor,
 		fontSize: S.textFontSize,
@@ -270,7 +287,8 @@ function applyText() {
 
 function applyArrow() {
 
-	decals.setStyle( arrowId, {
+	if ( shapeIds.arrowId == null ) return;
+	decals.setStyle( shapeIds.arrowId, {
 		fillColor: S.arrowFillColor,
 		fillOpacity: S.arrowFillOpacity,
 		strokeColor: S.arrowStrokeColor,
@@ -306,6 +324,101 @@ function addVisibleToggle( folder, prefix, apply ) {
 
 }
 
+// ────────────────────── shape factory helpers ──────────────────────
+
+function addDemoPoint() {
+
+	return decals.addPoint( {
+		points: [[ 120, 30 ]],
+		size: S.pointSize, pointStyle: S.pointStyle,
+		fillColor: S.pointFillColor, fillOpacity: S.pointFillOpacity,
+		strokeColor: S.pointStrokeColor, strokeWidth: S.pointStrokeWidth, strokeOpacity: S.pointStrokeOpacity,
+		visible: S.pointVisible,
+	} );
+
+}
+
+function addDemoLine() {
+
+	return decals.addLine( {
+		points: [[ 100.50, 22.85 ], [ 100.60, 22.90 ], [ 100.70, 22.87 ], [ 100.80, 22.92 ], [ 100.90, 22.88 ]],
+		strokeColor: S.lineStrokeColor, strokeWidth: S.lineStrokeWidth, strokeOpacity: S.lineStrokeOpacity,
+		startArrowStyle: null, endArrowStyle: 'filled', arrowSize: S.lineArrowSize,
+		visible: S.lineVisible,
+	} );
+
+}
+
+function addDemoPolygon() {
+
+	return decals.addPolygon( {
+		points: [[ 100.60, 22.60 ], [ 100.70, 22.55 ], [ 100.75, 22.65 ], [ 100.68, 22.70 ], [ 100.58, 22.67 ]],
+		fillColor: S.polyFillColor, fillOpacity: S.polyFillOpacity,
+		strokeColor: S.polyStrokeColor, strokeWidth: S.polyStrokeWidth, strokeOpacity: S.polyStrokeOpacity,
+		visible: S.polyVisible,
+	} );
+
+}
+
+function addDemoRectangle() {
+
+	return decals.addRectangle( {
+		points: [[ 100.848518, 22.732947 ]],
+		width: 20000, height: 20000,
+		fillColor: S.rectFillColor, fillOpacity: S.rectFillOpacity,
+		strokeColor: S.rectStrokeColor, strokeWidth: S.rectStrokeWidth, strokeOpacity: S.rectStrokeOpacity,
+		visible: S.rectVisible,
+	} );
+
+}
+
+function addDemoSector() {
+
+	return decals.addSector( {
+		points: [[ 100.85, 22.65 ]],
+		radius: S.sectorRadius, startAngle: S.sectorStartAngle, sectorAngle: S.sectorAngle,
+		fillColor: S.sectorFillColor, fillOpacity: S.sectorFillOpacity,
+		strokeColor: S.sectorStrokeColor, strokeWidth: S.sectorStrokeWidth, strokeOpacity: S.sectorStrokeOpacity,
+		visible: S.sectorVisible,
+	} );
+
+}
+
+function addDemoCircle() {
+
+	return decals.addCircle( {
+		points: [[ 100.95, 22.80 ]],
+		radius: 8000,
+		fillColor: S.circleFillColor, fillOpacity: S.circleFillOpacity,
+		strokeColor: S.circleStrokeColor, strokeWidth: S.circleStrokeWidth, strokeOpacity: S.circleStrokeOpacity,
+		visible: S.circleVisible,
+	} );
+
+}
+
+function addDemoText() {
+
+	return decals.addText( {
+		points: [[ 100.848518, 22.732947 ]],
+		content: S.textContent, fontColor: S.textFontColor, fontSize: S.textFontSize,
+		strokeColor: S.textStrokeColor, strokeWidth: S.textStrokeWidth,
+		visible: S.textVisible,
+	} );
+
+}
+
+function addDemoArrow() {
+
+	return decals.addArrow( {
+		points: [[ 100.50, 22.70 ], [ 100.60, 22.78 ], [ 100.75, 22.60 ]],
+		arrowType: S.arrowType, headSize: S.arrowHeadSize,
+		fillColor: S.arrowFillColor, fillOpacity: S.arrowFillOpacity,
+		strokeColor: S.arrowStrokeColor, strokeWidth: S.arrowStrokeWidth, strokeOpacity: S.arrowStrokeOpacity,
+		visible: S.arrowVisible,
+	} );
+
+}
+
 // ────────────────────── init ──────────────────────
 
 function init() {
@@ -333,70 +446,14 @@ function init() {
 	// ── 创建标绘 ──
 	decals = new GroundDecalManager( { renderer } );
 
-	pointId = decals.addPoint( {
-		points: [[ 120, 30 ]],
-		size: S.pointSize,
-		pointStyle: S.pointStyle,
-		fillColor: S.pointFillColor,
-		fillOpacity: S.pointFillOpacity,
-		strokeColor: S.pointStrokeColor,
-		strokeWidth: S.pointStrokeWidth,
-		strokeOpacity: S.pointStrokeOpacity,
-		visible: S.pointVisible,
-	} );
-
-	lineId = decals.addLine( {
-		points: [[ 100.50, 22.85 ], [ 100.60, 22.90 ], [ 100.70, 22.87 ], [ 100.80, 22.92 ], [ 100.90, 22.88 ]],
-		strokeColor: S.lineStrokeColor, strokeWidth: S.lineStrokeWidth, strokeOpacity: S.lineStrokeOpacity,
-		startArrowStyle: null, endArrowStyle: 'filled', arrowSize: S.lineArrowSize,
-		visible: S.lineVisible,
-	} );
-
-	polygonId = decals.addPolygon( {
-		points: [[ 100.60, 22.60 ], [ 100.70, 22.55 ], [ 100.75, 22.65 ], [ 100.68, 22.70 ], [ 100.58, 22.67 ]],
-		fillColor: S.polyFillColor, fillOpacity: S.polyFillOpacity,
-		strokeColor: S.polyStrokeColor, strokeWidth: S.polyStrokeWidth, strokeOpacity: S.polyStrokeOpacity,
-		visible: S.polyVisible,
-	} );
-
-	rectId = decals.addRectangle( {
-		points: [[ 100.848518, 22.732947 ]],
-		width: 20000, height: 20000,
-		fillColor: S.rectFillColor, fillOpacity: S.rectFillOpacity,
-		strokeColor: S.rectStrokeColor, strokeWidth: S.rectStrokeWidth, strokeOpacity: S.rectStrokeOpacity,
-		visible: S.rectVisible,
-	} );
-
-	sectorId = decals.addSector( {
-		points: [[ 100.85, 22.65 ]],
-		radius: S.sectorRadius, startAngle: S.sectorStartAngle, sectorAngle: S.sectorAngle,
-		fillColor: S.sectorFillColor, fillOpacity: S.sectorFillOpacity,
-		strokeColor: S.sectorStrokeColor, strokeWidth: S.sectorStrokeWidth, strokeOpacity: S.sectorStrokeOpacity,
-		visible: S.sectorVisible,
-	} );
-
-	circleId = decals.addCircle( {
-		points: [[ 100.95, 22.80 ]],
-		radius: 8000,
-		fillColor: S.circleFillColor, fillOpacity: S.circleFillOpacity,
-		strokeColor: S.circleStrokeColor, strokeWidth: S.circleStrokeWidth, strokeOpacity: S.circleStrokeOpacity,
-		visible: S.circleVisible,
-	} );
-
-	textId = decals.addText( {
-		points: [[ 100.848518, 22.732947 ]],
-		content: S.textContent, fontColor: S.textFontColor, fontSize: S.textFontSize,
-		strokeColor: S.textStrokeColor, strokeWidth: S.textStrokeWidth,
-		visible: S.textVisible,
-	} );
-
-	arrowId = decals.addArrow( {
-		points: [[ 100.50, 22.70 ], [ 100.60, 22.78 ], [ 100.75, 22.60 ]],
-		arrowType: S.arrowType, headSize: S.arrowHeadSize,
-		fillColor: S.arrowFillColor, fillOpacity: S.arrowFillOpacity,
-		strokeColor: S.arrowStrokeColor, strokeWidth: S.arrowStrokeWidth, strokeOpacity: S.arrowStrokeOpacity,
-		visible: S.arrowVisible,
-	} );
+	shapeIds.pointId = addDemoPoint();
+	shapeIds.lineId = addDemoLine();
+	shapeIds.polygonId = addDemoPolygon();
+	shapeIds.rectId = addDemoRectangle();
+	shapeIds.sectorId = addDemoSector();
+	shapeIds.circleId = addDemoCircle();
+	shapeIds.textId = addDemoText();
+	shapeIds.arrowId = addDemoArrow();
 
 	reinstantiateTiles();
 
@@ -467,6 +524,70 @@ function init() {
 	addStrokeControls( arF, 'arrow', applyArrow );
 	arF.add( S, 'arrowHeadSize', 1, 50, 1 ).name( 'Head Size' ).onChange( applyArrow );
 	addVisibleToggle( arF, 'arrow', applyArrow );
+
+	// ── Delete / Re-add ──
+	const deleteFolder = gui.addFolder( 'Delete & Re-add' );
+
+	const shapeEntries = [
+		{ label: 'Point', idKey: 'pointId', addFn: () => addDemoPoint(), folders: [ ptF ] },
+		{ label: 'Line', idKey: 'lineId', addFn: () => addDemoLine(), folders: [ lnF ] },
+		{ label: 'Polygon', idKey: 'polygonId', addFn: () => addDemoPolygon(), folders: [ pgF ] },
+		{ label: 'Rectangle', idKey: 'rectId', addFn: () => addDemoRectangle(), folders: [ rcF ] },
+		{ label: 'Sector', idKey: 'sectorId', addFn: () => addDemoSector(), folders: [ scF ] },
+		{ label: 'Circle', idKey: 'circleId', addFn: () => addDemoCircle(), folders: [ ciF ] },
+		{ label: 'Text', idKey: 'textId', addFn: () => addDemoText(), folders: [ txF ] },
+		{ label: 'Arrow', idKey: 'arrowId', addFn: () => addDemoArrow(), folders: [ arF ] },
+	];
+
+	for ( const entry of shapeEntries ) {
+
+		const actions = { delete: null, add: null };
+
+		actions.delete = () => {
+
+			const id = shapeIds[ entry.idKey ];
+			if ( id == null ) return;
+			decals.remove( id );
+			shapeIds[ entry.idKey ] = null;
+			entry.folders.forEach( f => f.hide() );
+
+		};
+
+		actions.add = () => {
+
+			if ( shapeIds[ entry.idKey ] != null ) return;
+			shapeIds[ entry.idKey ] = entry.addFn();
+			entry.folders.forEach( f => f.show() );
+
+		};
+
+		deleteFolder.add( actions, 'delete' ).name( 'Delete ' + entry.label );
+		deleteFolder.add( actions, 'add' ).name( 'Re-add ' + entry.label );
+
+	}
+
+	deleteFolder.add( { clearAll: () => {
+
+		decals.clear();
+		for ( const key in shapeIds ) shapeIds[ key ] = null;
+		shapeEntries.forEach( e => e.folders.forEach( f => f.hide() ) );
+
+	} }, 'clearAll' ).name( 'Clear All' );
+
+	deleteFolder.add( { reAddAll: () => {
+
+		for ( const entry of shapeEntries ) {
+
+			if ( shapeIds[ entry.idKey ] == null ) {
+
+				shapeIds[ entry.idKey ] = entry.addFn();
+				entry.folders.forEach( f => f.show() );
+
+			}
+
+		}
+
+	} }, 'reAddAll' ).name( 'Re-add All' );
 
 }
 

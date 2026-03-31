@@ -14,5 +14,6 @@ export class PlotImageSource {
 	get( ...tokens: number[] ): unknown;
 	lock( ...tokens: number[] ): unknown;
 	release( ...tokens: number[] ): void;
+	dispose(): void;
 
 }
