@@ -4,8 +4,8 @@
  * RTT 方案：标绘图形通过 PlotOverlay 渲染到瓦片纹理上，
  * 不需要 decals.render()，ImageOverlayPlugin 自动处理渲染。
  */
-import { GlobeControls, TilesRenderer } from '3d-tiles-renderer';
-import { CesiumIonAuthPlugin, QuantizedMeshPlugin, GLTFExtensionsPlugin, ImageOverlayPlugin, CesiumIonOverlay } from '3d-tiles-renderer/plugins';
+import { GlobeControls, TilesRenderer } from 'um-3d-tiles-renderer';
+import { CesiumIonAuthPlugin, QuantizedMeshPlugin, GLTFExtensionsPlugin, ImageOverlayPlugin, CesiumIonOverlay } from 'um-3d-tiles-renderer/plugins';
 import {
 	Scene,
 	WebGLRenderer,

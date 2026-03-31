@@ -316,7 +316,7 @@ void main() {
 			float cr1 = dn.x * e1.y - dn.y * e1.x;
 			float cr2 = dn.x * e2.y - dn.y * e2.x;
 
-			bool inAngle = da <= 3.14159 ? ( cr1 >= 0.0 && cr2 <= 0.0 ) : ( cr1 >= 0.0 || cr2 <= 0.0 );
+			bool inAngle = da <= 3.14159 ? ( cr1 <= 0.0 && cr2 >= 0.0 ) : ( cr1 <= 0.0 || cr2 >= 0.0 );
 
 			float fillSdf = ( dist - 1.0 ) * min( rLon, rLat );
 			if ( ! inAngle ) fillSdf = abs( fillSdf ) + 0.01;

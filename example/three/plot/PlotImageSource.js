@@ -31,8 +31,8 @@ import {
 } from 'three';
 
 const _clearColor = new Color();
-import { RegionImageSource } from '../../../../src/three/plugins/images/sources/RegionImageSource.js';
-import { ProjectionScheme } from '../../../../src/three/plugins/images/utils/ProjectionScheme.js';
+import { RegionImageSource } from '../../../src/three/plugins/images/sources/RegionImageSource.js';
+import { ProjectionScheme } from '../../../src/three/plugins/images/utils/ProjectionScheme.js';
 import { TILE_SDF_VERTEX, TILE_SDF_FRAGMENT } from './TileSdfShader.js';
 
 const DEG2RAD = MathUtils.DEG2RAD;
@@ -172,10 +172,55 @@ export class PlotImageSource extends RegionImageSource {
 	redraw() {
 
 		this._updateBounds();
-		this._buildLabelAtlas();
 
-		// 清除缓存，强制 plugin 重新请求所有瓦片纹理
-		this.dispose();
+		this.forEachItem( ( texture, args ) => {
+
+			this._rerenderItem( texture, args );
+
+		} );
+
+	}
+
+	_rerenderItem( texture, tokens ) {
+
+		const rt = texture._parentRT;
+		if ( ! rt || ! this._gpuReady ) return;
+
+		const [ minX, minY, maxX, maxY ] = tokens;
+		const { projection, resolution } = this;
+
+		const minLonDeg = projection.convertNormalizedToLongitude( minX ) * RAD2DEG;
+		const minLatDeg = projection.convertNormalizedToLatitude( minY ) * RAD2DEG;
+		const maxLonDeg = projection.convertNormalizedToLongitude( maxX ) * RAD2DEG;
+		const maxLatDeg = projection.convertNormalizedToLatitude( maxY ) * RAD2DEG;
+		const tileBounds = [ minLonDeg, minLatDeg, maxLonDeg, maxLatDeg ];
+
+		const shapeDataTex = this._buildShapeDataForTile( tileBounds );
+
+		const u = this._sdfMaterial.uniforms;
+		u.uTileBounds.value.set( minLonDeg, minLatDeg, maxLonDeg, maxLatDeg );
+		u.uResolution.value = resolution;
+		u.tShapeData.value = shapeDataTex;
+		u.tLabelAtlas.value = this._labelAtlasTex;
+
+		const renderer = this._renderer;
+		const prevRT = renderer.getRenderTarget();
+		const prevClear = renderer.getClearColor( _clearColor );
+		const prevAlpha = renderer.getClearAlpha();
+
+		renderer.setRenderTarget( rt );
+		renderer.setClearColor( 0x000000, 0 );
+		renderer.clear();
+
+		if ( shapeDataTex ) {
+
+			renderer.render( this._sdfScene, this._sdfCamera );
+			shapeDataTex.dispose();
+
+		}
+
+		renderer.setClearColor( prevClear, prevAlpha );
+		renderer.setRenderTarget( prevRT );
 
 	}
 
