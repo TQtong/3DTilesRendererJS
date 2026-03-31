@@ -1,13 +1,42 @@
 /**
- * PlotImageSource.js — 标绘图形 SDF 渲染源
+ * @fileoverview **PlotImageSource** — 将矢量标绘（点、线、面、矩形、圆、扇形、文字、箭头等）渲染为
+ * 与 `ImageOverlayPlugin` 兼容的按瓦片 RGBA 纹理。
  *
- * 使用 WebGLRenderTarget + SDF ShaderMaterial 将标绘图形渲染到 per-tile 纹理上。
- * 继承 RegionImageSource（DataCache），支持 lock/release/get 缓存机制。
+ * ## 架构角色
+ * - 继承 {@link RegionImageSource} → {@link DataCache}：对每个归一化地理范围 `tokens = [minX,minY,maxX,maxY]`
+ *   维护 `lock` / `release` / `get` 缓存，与 {@link GeoJSONImageSource} 同属「区域图像源」一族。
+ * - **不**自带 HTTP 拉片逻辑；纹理完全在本地由 WebGL 离屏绘制生成。
  *
- * 核心流程：
- *   1. ImageOverlayPlugin 调用 hasContent(range) 判断该瓦片是否有图形
- *   2. 调用 lock(range) → fetchItem(tokens) → SDF 渲染到 WebGLRenderTarget → 拷贝纹理
- *   3. 数据变化时调用 redraw() 重新渲染所有已缓存的瓦片
+ * ## 与 ImageOverlayPlugin 的协作
+ * 1. 插件在瓦片加载后根据 mesh 的地理范围计算 `range`，调用 `overlay.lockTexture(range, tile)`。
+ * 2. 内部转为对本类 `lock(...tokens)` → 首次命中时异步执行 `fetchItem(tokens)`。
+ * 3. `fetchItem` 把当前瓦片内可见图元打包为浮点数据纹理，绑定到 SDF 材质，渲染到 **独立** `WebGLRenderTarget`，
+ *    返回 `rt.texture`（并在 `texture._parentRT` 上挂回 RT 引用，供 `disposeItem` / `redraw` 使用）。
+ * 4. 插件把该纹理赋给地形材质的 overlay 层；`hasContent` 用于跳过完全无图元的瓦片以省显存与算力。
+ *
+ * ## `shapes` 约定（由业务层注入）
+ * - 类型：`Map< id, shapeObject >`。
+ * - `shapeObject` 至少包含：
+ *   - `category`：`point` | `line` | `polygon` | `rectangle` | `circle` | `sector` | `text` | `arrow`
+ *   - `options`：各图元样式与几何（`points`、`visible`、颜色、线宽、半径、文字内容等）。
+ * - **箭头**（`arrow`）对象须实现 `generateCoords()` → `[[lon,lat], ...]` 多边形顶点（度），与示例工程 `PlotArrow` 一致。
+ *
+ * ## WebGLRenderer 与运行环境
+ * - 构造选项 `renderer` 或稍后 `setRenderer(renderer)` **必须**指向与主场景相同的 `WebGLRenderer`（共享 GL 上下文）。
+ * - 标签使用 `document.createElement('canvas')` 栅格化，需在浏览器 DOM 环境运行。
+ *
+ * ## `redraw()` 语义（重要）
+ * 标绘数据变更后应调用 `redraw()`（通常经 `PlotOverlay.redraw` 转发）。
+ * 实现上对 `DataCache` 中**已有**条目调用 `forEachItem`，在**原** `WebGLRenderTarget` 上重新执行 SDF pass。
+ * **禁止**在 `redraw` 中 `dispose()` 整个缓存：插件仍持有旧 `Texture` 引用，销毁后会导致整层叠加空白（与 GeoJSON 的
+ * 原地重绘策略一致）。
+ *
+ * ## 坐标与单位
+ * - 图元几何与 `uTileBounds` 均为 **WGS84 度数**（经度、纬度）。
+ * - `strokeWidth` 等在 CPU 侧按「屏幕像素近似」换算为度数：`pxDeg = 瓦片经度跨度 / resolution`。
+ * - 圆、椭圆、扇形用经纬方向不同半径补偿纬度缩放；文字 footprint 用经验常数 `LABEL_M_PER_PX` 映射 atlas 像素到地面范围。
+ *
+ * @module images/sources/PlotImageSource
  */
 
 import {
@@ -30,34 +59,62 @@ import {
 	Vector4,
 } from 'three';
 
-const _clearColor = new Color();
-import { RegionImageSource } from '../../../src/three/plugins/images/sources/RegionImageSource.js';
-import { ProjectionScheme } from '../../../src/three/plugins/images/utils/ProjectionScheme.js';
+import { RegionImageSource } from '../RegionImageSource.js';
+import { ProjectionScheme } from '../../utils/ProjectionScheme.js';
 import { TILE_SDF_VERTEX, TILE_SDF_FRAGMENT } from './TileSdfShader.js';
+
+/** @type {Color} 保存/恢复 renderer 清屏色时的临时变量 */
+const _clearColor = new Color();
 
 const DEG2RAD = MathUtils.DEG2RAD;
 const RAD2DEG = MathUtils.RAD2DEG;
 
+/** 标签图集边长（像素）。所有文字打在同一张 atlas 上，避免每字一张纹理。 */
 const LABEL_ATLAS_SIZE = 2048;
 
+/**
+ * 标绘矢量 → 按瓦片 SDF 纹理的数据源。
+ *
+ * @extends RegionImageSource
+ */
 export class PlotImageSource extends RegionImageSource {
 
+	/**
+	 * @param {object} [options={}]
+	 * @param {number} [options.resolution=512] 每个瓦片纹理边长（正方形）。
+	 * @param {import('three').WebGLRenderer | null} [options.renderer=null] 离屏绘制用的 WebGL 渲染器；可稍后 `setRenderer`。
+	 */
 	constructor( options = {} ) {
 
 		super();
+		/** @type {number} 瓦片纹理分辨率（宽=高） */
 		this.resolution = options.resolution || 512;
+		/** @type {ProjectionScheme} 归一化坐标 ↔ 经纬弧度/度数 */
 		this.projection = new ProjectionScheme();
+		/**
+		 * 业务层持有的标绘集合。键为数值 id，值为带 `category` / `options` 的描述对象。
+		 * @type {Map<number, object>}
+		 */
 		this.shapes = new Map();
+		/**
+		 * 所有可见图元的外包矩形 [minLon, minLat, maxLon, maxLat]（度），无图元时为 `null`。
+		 * @type {number[] | null}
+		 */
 		this.contentBounds = null;
 
+		/** @type {import('three').WebGLRenderer | null} */
 		this._renderer = options.renderer || null;
 		this._rt = null;
+		/** @type {Scene | null} */
 		this._sdfScene = null;
+		/** @type {OrthographicCamera | null} */
 		this._sdfCamera = null;
+		/** @type {ShaderMaterial | null} */
 		this._sdfMaterial = null;
+		/** SDF 四边形场景是否已构建 */
 		this._gpuReady = false;
 
-		// 标签 atlas
+		// ── 标签 atlas：2D Canvas → CanvasTexture，片元 type 4 按 UV 采样 ──
 		this._labelCanvas = document.createElement( 'canvas' );
 		this._labelCanvas.width = LABEL_ATLAS_SIZE;
 		this._labelCanvas.height = LABEL_ATLAS_SIZE;
@@ -65,10 +122,15 @@ export class PlotImageSource extends RegionImageSource {
 		this._labelAtlasTex.flipY = false;
 		this._labelAtlasTex.minFilter = LinearFilter;
 		this._labelAtlasTex.magFilter = LinearFilter;
+		/** @type {Map<number, { halfWDeg: number, halfHDeg: number, u0: number, v0: number, u1: number, v1: number }>} */
 		this._labelTiles = new Map();
 
 	}
 
+	/**
+	 * 初始化：合并包围盒、构建标签图集、懒创建 GPU 资源。
+	 * @returns {Promise<void>}
+	 */
 	async init() {
 
 		this._updateBounds();
@@ -76,12 +138,26 @@ export class PlotImageSource extends RegionImageSource {
 
 	}
 
+	/**
+	 * 若构造时未传入 renderer，在注册进 `ImageOverlayPlugin` 之前必须调用。
+	 * @param {import('three').WebGLRenderer} renderer
+	 */
 	setRenderer( renderer ) {
 
 		this._renderer = renderer;
 
 	}
 
+	/**
+	 * 给定插件传入的**归一化**瓦片范围，判断是否与当前 `contentBounds`（度）相交。
+	 * 用于避免对空白区域分配 RT。
+	 *
+	 * @param {number} minX
+	 * @param {number} minY
+	 * @param {number} maxX
+	 * @param {number} maxY
+	 * @returns {boolean}
+	 */
 	hasContent( minX, minY, maxX, maxY ) {
 
 		if ( ! this.contentBounds || this.shapes.size === 0 ) return false;
@@ -97,6 +173,12 @@ export class PlotImageSource extends RegionImageSource {
 
 	}
 
+	/**
+	 * DataCache 在首次 `lock` 时调用：生成该瓦片的叠加纹理。
+	 *
+	 * @param {number[]} tokens `[minX, minY, maxX, maxY]` 归一化坐标
+	 * @returns {Promise<import('three').Texture>}
+	 */
 	async fetchItem( tokens ) {
 
 		if ( ! this._gpuReady ) this._initGPU();
@@ -119,7 +201,7 @@ export class PlotImageSource extends RegionImageSource {
 		u.tShapeData.value = shapeDataTex;
 		u.tLabelAtlas.value = this._labelAtlasTex;
 
-		// 每个瓦片独立的 RT → 返回其 texture 避免 readPixels 拷贝
+		// 每瓦片独立 RT：返回其 color attachment，避免 readPixels
 		const rt = new WebGLRenderTarget( resolution, resolution, {
 			depthBuffer: false,
 			stencilBuffer: false,
@@ -146,6 +228,9 @@ export class PlotImageSource extends RegionImageSource {
 
 	}
 
+	/**
+	 * @param {import('three').Texture} texture
+	 */
 	disposeItem( texture ) {
 
 		if ( texture._parentRT ) {
@@ -160,6 +245,10 @@ export class PlotImageSource extends RegionImageSource {
 
 	}
 
+	/**
+	 * `hasContent` 为真但瓦片内无矢量时返回的 1×1 透明占位纹理。
+	 * @returns {import('three').DataTexture}
+	 */
 	_createEmptyTexture() {
 
 		const data = new Uint8Array( 4 );
@@ -169,6 +258,9 @@ export class PlotImageSource extends RegionImageSource {
 
 	}
 
+	/**
+	 * 标绘数据变更后调用：更新包围盒与标签图集，并对**已缓存**瓦片原地重绘。
+	 */
 	redraw() {
 
 		this._updateBounds();
@@ -181,6 +273,11 @@ export class PlotImageSource extends RegionImageSource {
 
 	}
 
+	/**
+	 * 在已有 `WebGLRenderTarget` 上重新执行 SDF pass（`redraw` 路径）。
+	 * @param {import('three').Texture} texture
+	 * @param {number[]} tokens 与 `fetchItem` 相同的归一化 tokens
+	 */
 	_rerenderItem( texture, tokens ) {
 
 		const rt = texture._parentRT;
@@ -224,10 +321,9 @@ export class PlotImageSource extends RegionImageSource {
 
 	}
 
-	// ═══════════════════════════════════════════
-	// GPU 初始化
-	// ═══════════════════════════════════════════
-
+	/**
+	 * 创建 SDF 全屏 pass：单 Quad + {@link TILE_SDF_FRAGMENT}。
+	 */
 	_initGPU() {
 
 		if ( ! this._renderer ) return;
@@ -258,10 +354,14 @@ export class PlotImageSource extends RegionImageSource {
 
 	}
 
-	// ═══════════════════════════════════════════
-	// 图形数据打包
-	// ═══════════════════════════════════════════
-
+	/**
+	 * 将 `tileBounds`（度）内相交的图元编码为 1D Float32 纹理，格式与 `TileSdfShader` 中 `readF` 一致。
+	 *
+	 * 每图元块：`type`, `totalFloats`, `fillRGBA×4`, `strokeRGBA×4`, `strokeWidthDeg`, `opacity`, 然后类型相关字段……
+	 *
+	 * @param {number[]} tileBounds [minLon, minLat, maxLon, maxLat] 度
+	 * @returns {import('three').DataTexture | null} 无图元时返回 `null`（调用方清空 RT）
+	 */
 	_buildShapeDataForTile( tileBounds ) {
 
 		const midLat = ( tileBounds[ 1 ] + tileBounds[ 3 ] ) / 2;
@@ -396,10 +496,10 @@ export class PlotImageSource extends RegionImageSource {
 
 	}
 
-	// ═══════════════════════════════════════════
-	// 标签 atlas
-	// ═══════════════════════════════════════════
-
+	/**
+	 * 遍历 `shapes` 中文本项，在共享 canvas 上排版并写入 `_labelTiles`（半宽/半高/UV）。
+	 * `LABEL_M_PER_PX` 将像素尺度映射到地面度数，与 `hasContent` 中文字包围盒估算同一量级。
+	 */
 	_buildLabelAtlas() {
 
 		this._labelTiles.clear();
@@ -423,7 +523,14 @@ export class PlotImageSource extends RegionImageSource {
 			const tw = Math.ceil( metrics.width + pad * 2 );
 			const th = Math.ceil( fontSize * 1.4 + pad * 2 );
 
-			if ( cursorX + tw > LABEL_ATLAS_SIZE ) { cursorX = 0; cursorY += rowH; rowH = 0; }
+			if ( cursorX + tw > LABEL_ATLAS_SIZE ) {
+
+				cursorX = 0;
+				cursorY += rowH;
+				rowH = 0;
+
+			}
+
 			if ( cursorY + th > LABEL_ATLAS_SIZE ) break;
 
 			const tx = cursorX, ty = cursorY;
@@ -465,10 +572,9 @@ export class PlotImageSource extends RegionImageSource {
 
 	}
 
-	// ═══════════════════════════════════════════
-	// 包围盒
-	// ═══════════════════════════════════════════
-
+	/**
+	 * 根据当前 `shapes` 重算 `contentBounds` 并刷新标签图集。
+	 */
 	_updateBounds() {
 
 		let minLon = Infinity, minLat = Infinity;
@@ -495,6 +601,11 @@ export class PlotImageSource extends RegionImageSource {
 
 	}
 
+	/**
+	 * 单图元外包盒（度），用于剔除与瓦片不相交的图元。
+	 * @param {object} shape
+	 * @returns {number[] | null} [minLon, minLat, maxLon, maxLat]
+	 */
 	_getShapeBounds( shape ) {
 
 		const pts = shape.options.points;
@@ -564,10 +675,14 @@ export class PlotImageSource extends RegionImageSource {
 
 }
 
-// ═══════════════════════════════════════════
-// Helpers
-// ═══════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+// 模块内工具函数（不导出）
+// ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * @param {string | undefined} color
+ * @returns {[number, number, number, number]} RGBA 线性 0..1
+ */
 function _parseColor( color ) {
 
 	if ( ! color || color === 'transparent' ) return [ 0, 0, 0, 0 ];
@@ -589,6 +704,10 @@ function _parseColor( color ) {
 
 }
 
+/**
+ * @param {string | null | undefined} style
+ * @returns {number} 与片元 `arrowSdf` 中分支对应
+ */
 function _arrowInt( style ) {
 
 	if ( ! style ) return 0;
@@ -596,6 +715,11 @@ function _arrowInt( style ) {
 
 }
 
+/**
+ * 两个轴对齐矩形是否相交（度坐标）。
+ * @param {number[]} a [minLon, minLat, maxLon, maxLat]
+ * @param {number[]} b
+ */
 function _boundsIntersect( a, b ) {
 
 	if ( ! a || ! b ) return false;

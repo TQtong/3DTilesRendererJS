@@ -15,7 +15,7 @@ import {
 } from 'three';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
-import { GroundDecalManager } from './plot/index.js';
+import { GroundDecalManager } from './GroundDecalManager.js';
 
 let camera, controls, scene, renderer, tiles, imageryOverlay;
 let decals;

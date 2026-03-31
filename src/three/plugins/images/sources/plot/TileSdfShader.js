@@ -1,28 +1,16 @@
 /**
- * TileSdfShader.js — Per-tile SDF 着色器
+ * @fileoverview 与 {@link PlotImageSource} 配套的 GLSL3 片元着色器：在瓦片 lon/lat 度数范围内
+ * 对打包到 `tShapeData` 中的矢量图元求 SDF，并做填充、描边与文本采样。
  *
- * 在 lon/lat 度坐标系下工作，不依赖深度缓冲重建。
- * UV [0,1] 直接映射到瓦片的 lon/lat 地理范围。
- * smoothstep 提供像素级完美抗锯齿。
+ * 顶点着色器仅为全屏四边形传递 `vUv`。数据布局须与 `PlotImageSource._buildShapeDataForTile` 严格一致。
  *
- * 数据纹理打包格式（12-float 头部 + 图形特有数据）：
- *   arr[0] = 图形总数
- *   每个图形：
- *     [0]  type           [1]  totalFloats
- *     [2-5]  fillRGBA     [6-9]  strokeRGBA
- *     [10] strokeWidth（度） [11] opacity
- *     [12+] 图形特有数据（坐标全部为 lon/lat 度）
- *
- * 图形类型：
- *   0 = rect:    [12] centerLon [13] centerLat [14] halfWDeg [15] halfHDeg
- *   1 = circle:  [12] centerLon [13] centerLat [14] radiusDegLon [15] radiusDegLat
- *   2 = polygon: [12] vc [13..] lon0,lat0, lon1,lat1, ...
- *   3 = polyline: [12] vc [13] hwDeg [14] startArrow [15] endArrow [16] aszDeg [17..] vertices
- *   4 = text:    [12] centerLon [13] centerLat [14] halfWDeg [15] halfHDeg [16-19] UVs
- *   5 = sector:  [12] centerLon [13] centerLat [14] rDegLon [15] rDegLat [16] startAngle [17] sectorAngle
- *   6 = point:   [12] centerLon [13] centerLat [14] halfSizeDegLon [15] halfSizeDegLat [16] pointStyle
+ * @see PlotImageSource.js
  */
 
+/**
+ * 全屏四边形顶点着色器：输出归一化 UV，片元中映射到 `uTileBounds` 定义的地理范围。
+ * @type {string}
+ */
 export const TILE_SDF_VERTEX = /* glsl */ `
 out vec2 vUv;
 void main() {
@@ -31,6 +19,10 @@ void main() {
 }
 `;
 
+/**
+ * 片元着色器：按 `readF` 从 `tShapeData` 顺序读取图元块；类型 4 从 `tLabelAtlas` 按 UV 采样文字。
+ * @type {string}
+ */
 export const TILE_SDF_FRAGMENT = /* glsl */ `
 precision highp int;
 
