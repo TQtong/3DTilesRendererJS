@@ -1,8 +1,8 @@
 /**
  * touchGround.js — GroundDecalManager 测试/演示页面
  *
- * 数据结构对齐 types.ts（GisPlotBaseOptions / PlotPointOptions / ...）。
- * 所有 add* 调用传入单一 options 对象，样式字段使用 fillColor / strokeColor 命名。
+ * RTT 方案：标绘图形通过 PlotOverlay 渲染到瓦片纹理上，
+ * 不需要 decals.render()，ImageOverlayPlugin 自动处理渲染。
  */
 import { GlobeControls, TilesRenderer } from '3d-tiles-renderer';
 import { CesiumIonAuthPlugin, QuantizedMeshPlugin, GLTFExtensionsPlugin, ImageOverlayPlugin, CesiumIonOverlay } from '3d-tiles-renderer/plugins';
@@ -29,12 +29,9 @@ const params = {
 	reload: reinstantiateTiles,
 };
 
-// ── GUI 参数（对齐 GisPlotBaseOptions 命名） ──
-
 const S = {
 	globalOpacity: 1.0,
 
-	// Point (PlotPointOptions)
 	pointStyle: 'circle',
 	pointSize: 2000,
 	pointFillColor: '#3B82F6',
@@ -44,7 +41,6 @@ const S = {
 	pointStrokeOpacity: 100,
 	pointVisible: true,
 
-	// Line (PlotLineOptions)
 	lineStrokeColor: '#ff00ff',
 	lineStrokeWidth: 8,
 	lineStrokeOpacity: 90,
@@ -53,7 +49,6 @@ const S = {
 	lineArrowSize: 20,
 	lineVisible: true,
 
-	// Polygon (PlotPolygonOptions)
 	polyFillColor: '#3B82F6',
 	polyFillOpacity: 40,
 	polyStrokeColor: '#1D4ED8',
@@ -61,7 +56,6 @@ const S = {
 	polyStrokeOpacity: 100,
 	polyVisible: true,
 
-	// Rectangle (PlotRectangleOptions)
 	rectFillColor: '#22c55e',
 	rectFillOpacity: 60,
 	rectStrokeColor: '#15803d',
@@ -69,7 +63,6 @@ const S = {
 	rectStrokeOpacity: 100,
 	rectVisible: true,
 
-	// Sector (PlotSectorOptions)
 	sectorFillColor: '#f59e0b',
 	sectorFillOpacity: 50,
 	sectorStrokeColor: '#b45309',
@@ -80,7 +73,6 @@ const S = {
 	sectorAngle: 90,
 	sectorVisible: true,
 
-	// Circle
 	circleFillColor: '#ef4444',
 	circleFillOpacity: 50,
 	circleStrokeColor: '#ffff00',
@@ -88,7 +80,6 @@ const S = {
 	circleStrokeOpacity: 100,
 	circleVisible: true,
 
-	// Arrow (PlotArrowOptions)
 	arrowType: 'fine',
 	arrowFillColor: '#3B82F6',
 	arrowFillOpacity: 60,
@@ -98,7 +89,6 @@ const S = {
 	arrowHeadSize: 16,
 	arrowVisible: true,
 
-	// Text (PlotTextOptions)
 	textContent: '思茅区',
 	textFontColor: '#ffffff',
 	textFontSize: 64,
@@ -161,9 +151,10 @@ function reinstantiateTiles() {
 		color: '#ffffff',
 	} );
 
+	// 标绘 overlay 和底图 overlay 一起注册（标绘在底图之上）
 	tiles.registerPlugin( new ImageOverlayPlugin( {
 		renderer,
-		overlays: [ imageryOverlay ],
+		overlays: [ imageryOverlay, decals.overlay ],
 	} ) );
 
 	tiles.group.rotation.x = - Math.PI / 2;
@@ -173,12 +164,6 @@ function reinstantiateTiles() {
 	if ( controls && controls.setEllipsoid ) {
 
 		controls.setEllipsoid( tiles.ellipsoid, tiles.group );
-
-	}
-
-	if ( decals ) {
-
-		decals.setEllipsoid( tiles.ellipsoid, tiles.group );
 
 	}
 
@@ -345,8 +330,8 @@ function init() {
 	controls = new GlobeControls( scene, camera, renderer.domElement );
 	controls.enableDamping = true;
 
-	// ── 创建标绘图形 ──
-	decals = new GroundDecalManager( renderer );
+	// ── 创建标绘 ──
+	decals = new GroundDecalManager();
 
 	pointId = decals.addPoint( {
 		points: [[ 120, 30 ]],
@@ -430,7 +415,6 @@ function init() {
 	const globalFolder = gui.addFolder( 'Global' );
 	globalFolder.add( S, 'globalOpacity', 0, 1, 0.05 ).name( 'Opacity' ).onChange( v => decals.setGlobalOpacity( v ) );
 
-	// Point
 	const ptF = gui.addFolder( 'Point' );
 	ptF.add( S, 'pointStyle', [ 'circle', 'square' ] ).name( 'Style' ).onChange( applyPoint );
 	ptF.add( S, 'pointSize', 100, 10000, 100 ).name( 'Size (m)' ).onChange( applyPoint );
@@ -438,7 +422,6 @@ function init() {
 	addStrokeControls( ptF, 'point', applyPoint );
 	addVisibleToggle( ptF, 'point', applyPoint );
 
-	// Line
 	const arrowOpts = [ 'none', 'filled', 'open', 'filledDiamond', 'openDiamond', 'filledCircle', 'openCircle', 'bar' ];
 	const lnF = gui.addFolder( 'Line' );
 	addStrokeControls( lnF, 'line', applyLine, 30 );
@@ -447,19 +430,16 @@ function init() {
 	lnF.add( S, 'lineArrowSize', 5, 60, 1 ).name( 'Arrow Size' ).onChange( applyLine );
 	addVisibleToggle( lnF, 'line', applyLine );
 
-	// Polygon
 	const pgF = gui.addFolder( 'Polygon' );
 	addFillControls( pgF, 'poly', applyPoly );
 	addStrokeControls( pgF, 'poly', applyPoly );
 	addVisibleToggle( pgF, 'poly', applyPoly );
 
-	// Rectangle
 	const rcF = gui.addFolder( 'Rectangle' );
 	addFillControls( rcF, 'rect', applyRect );
 	addStrokeControls( rcF, 'rect', applyRect );
 	addVisibleToggle( rcF, 'rect', applyRect );
 
-	// Sector
 	const scF = gui.addFolder( 'Sector' );
 	addFillControls( scF, 'sector', applySector );
 	addStrokeControls( scF, 'sector', applySector );
@@ -468,13 +448,11 @@ function init() {
 	scF.add( S, 'sectorAngle', 1, 360, 1 ).name( 'Sector Angle' ).onChange( applySector );
 	addVisibleToggle( scF, 'sector', applySector );
 
-	// Circle
 	const ciF = gui.addFolder( 'Circle' );
 	addFillControls( ciF, 'circle', applyCircle );
 	addStrokeControls( ciF, 'circle', applyCircle );
 	addVisibleToggle( ciF, 'circle', applyCircle );
 
-	// Text
 	const txF = gui.addFolder( 'Text' );
 	txF.add( S, 'textContent' ).name( 'Content' ).onFinishChange( applyText );
 	txF.addColor( S, 'textFontColor' ).name( 'Font Color' ).onChange( applyText );
@@ -483,7 +461,6 @@ function init() {
 	txF.add( S, 'textStrokeWidth', 0, 15, 1 ).name( 'Outline Width' ).onChange( applyText );
 	addVisibleToggle( txF, 'text', applyText );
 
-	// Arrow
 	const arF = gui.addFolder( 'Arrow' );
 	arF.add( S, 'arrowType', [ 'fine', 'curved', 'attack', 'straight' ] ).name( 'Type' ).onChange( applyArrow );
 	addFillControls( arF, 'arrow', applyArrow );
@@ -499,8 +476,6 @@ function onWindowResize() {
 	camera.updateProjectionMatrix();
 	renderer.setSize( window.innerWidth, window.innerHeight );
 	renderer.setPixelRatio( window.devicePixelRatio );
-
-	if ( decals ) decals.resize( window.innerWidth, window.innerHeight );
 
 }
 
@@ -518,12 +493,6 @@ function animate() {
 	camera.updateMatrixWorld();
 	tiles.update();
 
-	if ( imageryOverlay ) {
-
-		imageryOverlay.opacity = 1.0;
-
-	}
-
-	decals.render( scene, camera, tiles.group );
+	renderer.render( scene, camera );
 
 }
