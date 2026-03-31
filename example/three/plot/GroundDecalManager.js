@@ -15,17 +15,15 @@
  *   // 不需要 decals.render() — ImageOverlayPlugin 自动处理
  */
 
-import {
-	PlotOverlay,
-	PlotPoint,
-	PlotLine,
-	PlotPolygon,
-	PlotRectangle,
-	PlotCircle,
-	PlotSector,
-	PlotLabel,
-	PlotArrow,
-} from 'um-3d-tiles-renderer/three/plugins';
+import { PlotOverlay } from 'um-3d-tiles-renderer/three/plugins';
+import { PlotPoint } from './PlotPoint.js';
+import { PlotLine } from './PlotLine.js';
+import { PlotPolygon } from './PlotPolygon.js';
+import { PlotRectangle } from './PlotRectangle.js';
+import { PlotCircle } from './PlotCircle.js';
+import { PlotSector } from './PlotSector.js';
+import { PlotLabel } from './PlotLabel.js';
+import { PlotArrow } from './PlotArrow.js';
 
 export class GroundDecalManager {
 
