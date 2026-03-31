@@ -1,5 +1,5 @@
 import { Box3, Camera, Vector2, Matrix4, WebGLRenderer, Object3D, LoadingManager, Sphere } from 'three';
-import { Tile, TilesRendererBase, TilesRendererBaseEventMap } from '3d-tiles-renderer/core';
+import { Tile, TilesRendererBase, TilesRendererBaseEventMap } from 'um-3d-tiles-renderer/core';
 import { TilesGroup } from './TilesGroup.js';
 import { Ellipsoid } from '../math/Ellipsoid.js';
 

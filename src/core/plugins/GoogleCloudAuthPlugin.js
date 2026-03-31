@@ -1,4 +1,4 @@
-import { GoogleCloudAuth } from '3d-tiles-renderer/core/plugins';
+import { GoogleCloudAuth } from 'um-3d-tiles-renderer/core/plugins';
 import { GoogleAttributionsManager } from './GoogleAttributionsManager.js';
 
 const TILES_3D_API = 'https://tile.googleapis.com/v1/3dtiles/root.json';

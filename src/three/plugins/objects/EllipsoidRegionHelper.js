@@ -1,5 +1,5 @@
 import { Mesh, Vector3, MathUtils, BoxGeometry, BufferGeometry, EdgesGeometry, LineSegments, BufferAttribute } from 'three';
-import { EllipsoidRegion } from '3d-tiles-renderer/three';
+import { EllipsoidRegion } from 'um-3d-tiles-renderer/three';
 
 const _norm = /* @__PURE__ */ new Vector3();
 const _norm2 = /* @__PURE__ */ new Vector3();

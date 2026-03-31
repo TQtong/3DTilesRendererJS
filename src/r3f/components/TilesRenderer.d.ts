@@ -1,4 +1,4 @@
-import type { TilesRenderer as TilesRendererImpl, TilesRendererEventMap } from '3d-tiles-renderer/three';
+import type { TilesRenderer as TilesRendererImpl, TilesRendererEventMap } from 'um-3d-tiles-renderer/three';
 import type {
 	ReactNode,
 	Context,

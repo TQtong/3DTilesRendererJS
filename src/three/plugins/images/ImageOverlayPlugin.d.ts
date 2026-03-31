@@ -104,6 +104,25 @@ export class WMTSTilesOverlay extends ImageOverlay {
 
 }
 
+export class UrlTemplateTilesOverlay extends ImageOverlay {
+
+	constructor( options: {
+		url: string,
+		subdomains?: string | string[],
+		levels?: number,
+		tileDimension?: number,
+		projection?: string,
+		contentBoundingBox?: [ number, number, number, number ] | null,
+		customTags?: { [ key: string ]: string | ( ( x: number, y: number, level: number ) => string ) } | null,
+
+		color?: number | Color,
+		opacity?: number,
+		frame?: Matrix4 | null,
+		preprocessURL?: ( url: string ) => string | null;
+	} );
+
+}
+
 export class TMSTilesOverlay extends ImageOverlay {
 
 	constructor( options: {

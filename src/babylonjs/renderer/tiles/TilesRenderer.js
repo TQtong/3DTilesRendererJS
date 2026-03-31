@@ -1,4 +1,4 @@
-import { TilesRendererBase, LoaderUtils } from '3d-tiles-renderer/core';
+import { TilesRendererBase, LoaderUtils } from 'um-3d-tiles-renderer/core';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Frustum } from '@babylonjs/core/Maths/math.frustum';

@@ -1,5 +1,5 @@
 import { MathUtils, Vector2, Vector3 } from 'three';
-import { Ellipsoid } from '3d-tiles-renderer/three';
+import { Ellipsoid } from 'um-3d-tiles-renderer/three';
 import { GeometryClipper, hashVertex } from './GeometryClipper.js';
 
 const _cart = {};

@@ -1,4 +1,4 @@
-import { LoaderBase } from '3d-tiles-renderer/core';
+import { LoaderBase } from 'um-3d-tiles-renderer/core';
 
 export interface WMSService {
     name: string;

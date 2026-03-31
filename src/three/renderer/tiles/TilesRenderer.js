@@ -1,4 +1,4 @@
-import { TilesRendererBase, LoaderUtils } from '3d-tiles-renderer/core';
+import { TilesRendererBase, LoaderUtils } from 'um-3d-tiles-renderer/core';
 import { B3DMLoader } from '../loaders/B3DMLoader.js';
 import { PNTSLoader } from '../loaders/PNTSLoader.js';
 import { I3DMLoader } from '../loaders/I3DMLoader.js';
@@ -810,29 +810,41 @@ export class TilesRenderer extends TilesRendererBase {
 
 			} );
 
-			for ( let i = 0, l = geometry.length; i < l; i ++ ) {
+			if ( geometry ) {
 
-				geometry[ i ].dispose();
+				for ( let i = 0, l = geometry.length; i < l; i ++ ) {
 
-			}
-
-			for ( let i = 0, l = materials.length; i < l; i ++ ) {
-
-				materials[ i ].dispose();
-
-			}
-
-			for ( let i = 0, l = textures.length; i < l; i ++ ) {
-
-				const texture = textures[ i ];
-
-				if ( texture.image instanceof ImageBitmap ) {
-
-					texture.image.close();
+					geometry[ i ].dispose();
 
 				}
 
-				texture.dispose();
+			}
+
+			if ( materials ) {
+
+				for ( let i = 0, l = materials.length; i < l; i ++ ) {
+
+					materials[ i ].dispose();
+
+				}
+
+			}
+
+			if ( textures ) {
+
+				for ( let i = 0, l = textures.length; i < l; i ++ ) {
+
+					const texture = textures[ i ];
+
+					if ( texture.image instanceof ImageBitmap ) {
+
+						texture.image.close();
+
+					}
+
+					texture.dispose();
+
+				}
 
 			}
 

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+        <meta charset="utf-8"/>
+
+        <title>URL Template Tiles</title>
+        <link rel="stylesheet" href="../styles.css">
+    </head>
+    <body>
+        <div id="info"></div>
+        <script type="importmap">
+            {
+              "imports": {
+                "three": "/node_modules/three/build/three.module.js",
+                "three/": "/node_modules/three/",
+                "three/addons/": "/node_modules/three/examples/jsm/",
+                "three-mesh-bvh": "/node_modules/three-mesh-bvh/build/index.module.js",
+                "3d-tiles-renderer": "/build/index.js",
+                "3d-tiles-renderer/plugins": "/build/index.plugins.js",
+                "3d-tiles-renderer/core": "/build/index.core.js"
+              }
+            }
+          </script>
+        <script src="./test.js" type="module"></script>
+    </body>
+</html>

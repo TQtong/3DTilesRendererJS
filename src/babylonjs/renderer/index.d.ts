@@ -1,4 +1,4 @@
-import { TilesRendererBase, TilesRendererBaseEventMap } from '3d-tiles-renderer/core';
+import { TilesRendererBase, TilesRendererBaseEventMap } from 'um-3d-tiles-renderer/core';
 import { Scene } from '@babylonjs/core/scene';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 

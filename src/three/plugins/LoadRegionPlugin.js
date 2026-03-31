@@ -1,5 +1,5 @@
 import { Ray, Sphere } from 'three';
-import { OBB } from '3d-tiles-renderer/three';
+import { OBB } from 'um-3d-tiles-renderer/three';
 
 export class LoadRegionPlugin {
 
