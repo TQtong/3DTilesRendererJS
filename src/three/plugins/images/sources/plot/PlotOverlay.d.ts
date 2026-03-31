@@ -10,6 +10,7 @@ export class PlotOverlay {
 	opacity: number;
 	color: Color;
 	frame: unknown;
+	fetchOptions: unknown;
 	preprocessURL: unknown;
 	alphaMask: boolean;
 	alphaInvert: boolean;

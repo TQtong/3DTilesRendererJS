@@ -65,6 +65,7 @@ export class PlotOverlay {
 		this.opacity = options.opacity ?? 1;
 		this.color = new Color( options.color ?? 0xffffff );
 		this.frame = null;
+		this.fetchOptions = options.fetchOptions ?? {};
 		this.preprocessURL = null;
 		this.alphaMask = false;
 		this.alphaInvert = false;
