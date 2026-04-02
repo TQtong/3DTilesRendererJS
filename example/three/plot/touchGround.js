@@ -12,6 +12,10 @@ import {
 	PerspectiveCamera,
 	DataTexture,
 	EquirectangularReflectionMapping,
+	Raycaster,
+	Vector2,
+	Vector3,
+	MathUtils,
 } from 'three';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
@@ -19,6 +23,10 @@ import { GroundDecalManager } from './GroundDecalManager.js';
 
 let camera, controls, scene, renderer, tiles, imageryOverlay;
 let decals;
+
+const raycaster = new Raycaster();
+const mouse = new Vector2();
+const _hitPoint = new Vector3();
 
 const shapeIds = {
 	pointId: null,
@@ -460,6 +468,9 @@ function init() {
 	onWindowResize();
 	window.addEventListener( 'resize', onWindowResize, false );
 
+	// ── 点击拾取经纬度 ──
+	setupCoordPicker();
+
 	// ── GUI ──
 	const gui = new GUI();
 	gui.width = 300;
@@ -588,6 +599,82 @@ function init() {
 		}
 
 	} }, 'reAddAll' ).name( 'Re-add All' );
+
+}
+
+// ────────────────────── 点击拾取经纬度 ──────────────────────
+
+function setupCoordPicker() {
+
+	const tooltip = document.createElement( 'div' );
+	Object.assign( tooltip.style, {
+		position: 'fixed',
+		padding: '6px 12px',
+		background: 'rgba(0, 0, 0, 0.75)',
+		color: '#fff',
+		fontSize: '13px',
+		fontFamily: 'monospace',
+		borderRadius: '4px',
+		pointerEvents: 'none',
+		opacity: '0',
+		transition: 'opacity 0.2s',
+		zIndex: '9999',
+		whiteSpace: 'nowrap',
+	} );
+	document.body.appendChild( tooltip );
+
+	let fadeTimer = null;
+	const startPos = new Vector2();
+	const endPos = new Vector2();
+
+	renderer.domElement.addEventListener( 'pointerdown', e => {
+
+		startPos.set( e.clientX, e.clientY );
+
+	} );
+
+	renderer.domElement.addEventListener( 'pointerup', e => {
+
+		endPos.set( e.clientX, e.clientY );
+		if ( startPos.distanceTo( endPos ) > 3 ) return;
+
+		if ( ! tiles ) return;
+
+		const rect = renderer.domElement.getBoundingClientRect();
+		mouse.x = ( ( e.clientX - rect.left ) / rect.width ) * 2 - 1;
+		mouse.y = - ( ( e.clientY - rect.top ) / rect.height ) * 2 + 1;
+
+		raycaster.setFromCamera( mouse, camera );
+		raycaster.firstHitOnly = true;
+
+		const hits = raycaster.intersectObject( tiles.group, true );
+		if ( hits.length === 0 ) return;
+
+		// 射线交点在世界坐标系中，需要逆变换回 ECEF 坐标系
+		_hitPoint.copy( hits[ 0 ].point )
+			.applyMatrix4( tiles.group.matrixWorld.clone().invert() );
+
+		const cart = {};
+		tiles.ellipsoid.getPositionToCartographic( _hitPoint, cart );
+
+		const lat = ( cart.lat * MathUtils.RAD2DEG ).toFixed( 6 );
+		const lon = ( cart.lon * MathUtils.RAD2DEG ).toFixed( 6 );
+
+		tooltip.textContent = `Lat: ${ lat }°  Lon: ${ lon }°`;
+		tooltip.style.left = ( e.clientX + 14 ) + 'px';
+		tooltip.style.top = ( e.clientY - 30 ) + 'px';
+		tooltip.style.opacity = '1';
+
+		console.log( `Clicked: lat=${ lat }, lon=${ lon }` );
+
+		if ( fadeTimer ) clearTimeout( fadeTimer );
+		fadeTimer = setTimeout( () => {
+
+			tooltip.style.opacity = '0';
+
+		}, 3000 );
+
+	} );
 
 }
 
