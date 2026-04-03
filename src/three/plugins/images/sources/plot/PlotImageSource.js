@@ -431,10 +431,11 @@ export class PlotImageSource extends RegionImageSource {
 
 			} else if ( cat === 'rectangle' ) {
 
-				if ( pts.length === 0 ) continue;
-				const hwDeg = ( opts.width || 0 ) / 2 / metersPerDegLon;
-				const hhDeg = ( opts.height || 0 ) / 2 / metersPerDegLat;
-				arr.push( 0, 16, ...fill, ...stroke, swDeg, op, pts[ 0 ][ 0 ], pts[ 0 ][ 1 ], hwDeg, hhDeg );
+				const vc = pts.length;
+				if ( vc < 3 ) continue;
+				const total = 13 + vc * 2;
+				arr.push( 2, total, ...fill, ...stroke, swDeg, op, vc );
+				for ( const c of pts ) arr.push( c[ 0 ], c[ 1 ] );
 				shapeCount ++;
 
 			} else if ( cat === 'circle' ) {
@@ -629,13 +630,6 @@ export class PlotImageSource extends RegionImageSource {
 			const r = shape.options.radius || 0;
 			const dLon = r / ( 111320 * Math.cos( pts[ 0 ][ 1 ] * DEG2RAD ) );
 			const dLat = r / 111320;
-			minLon -= dLon; maxLon += dLon;
-			minLat -= dLat; maxLat += dLat;
-
-		} else if ( cat === 'rectangle' ) {
-
-			const dLon = ( shape.options.width || 0 ) / 2 / ( 111320 * Math.cos( pts[ 0 ][ 1 ] * DEG2RAD ) );
-			const dLat = ( shape.options.height || 0 ) / 2 / 111320;
 			minLon -= dLon; maxLon += dLon;
 			minLat -= dLat; maxLat += dLat;
 
