@@ -290,7 +290,7 @@ void main() {
 				}
 			}
 
-		// ── type 5: sector（椭圆补偿） ──
+		// ── type 5: sector（椭圆补偿，支持 -360°~360°） ──
 		} else if ( type == 5 ) {
 
 			vec2 c = vec2( readF( off + 12 ), readF( off + 13 ) );
@@ -299,16 +299,28 @@ void main() {
 			float sa = readF( off + 16 );
 			float da = readF( off + 17 );
 
+			float startA = sa;
+			float sweepA = abs( da );
+			if ( da < 0.0 ) startA = sa + da;
+
 			vec2 d = pos - c;
 			vec2 dn = d / vec2( rLon, rLat );
 			float dist = length( dn );
 
-			vec2 e1 = vec2( cos( sa ), sin( sa ) );
-			vec2 e2 = vec2( cos( sa + da ), sin( sa + da ) );
-			float cr1 = dn.x * e1.y - dn.y * e1.x;
-			float cr2 = dn.x * e2.y - dn.y * e2.x;
+			bool inAngle;
+			if ( sweepA >= 6.28318 ) {
 
-			bool inAngle = da <= 3.14159 ? ( cr1 <= 0.0 && cr2 >= 0.0 ) : ( cr1 <= 0.0 || cr2 >= 0.0 );
+				inAngle = true;
+
+			} else {
+
+				vec2 e1 = vec2( cos( startA ), sin( startA ) );
+				vec2 e2 = vec2( cos( startA + sweepA ), sin( startA + sweepA ) );
+				float cr1 = dn.x * e1.y - dn.y * e1.x;
+				float cr2 = dn.x * e2.y - dn.y * e2.x;
+				inAngle = sweepA <= 3.14159 ? ( cr1 <= 0.0 && cr2 >= 0.0 ) : ( cr1 <= 0.0 || cr2 >= 0.0 );
+
+			}
 
 			float fillSdf = ( dist - 1.0 ) * min( rLon, rLat );
 			if ( ! inAngle ) fillSdf = abs( fillSdf ) + 0.01;

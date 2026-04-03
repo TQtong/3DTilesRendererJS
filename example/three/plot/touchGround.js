@@ -371,7 +371,12 @@ function addDemoPolygon() {
 function addDemoRectangle() {
 
 	return decals.addRectangle( {
-		points: [[ 100.848518, 22.732947 ]],
+		points: [
+			[ 119.98958614828571, 29.981249367417227 ],
+			[ 119.98524036576107, 29.981153019385363 ],
+			[ 119.99513688269689, 29.984687707618647 ],
+			[ 119.99948281910438, 29.98478405905903 ],
+		],
 		width: 20000, height: 20000,
 		fillColor: S.rectFillColor, fillOpacity: S.rectFillOpacity,
 		strokeColor: S.rectStrokeColor, strokeWidth: S.rectStrokeWidth, strokeOpacity: S.rectStrokeOpacity,
@@ -513,7 +518,7 @@ function init() {
 	addStrokeControls( scF, 'sector', applySector );
 	scF.add( S, 'sectorRadius', 500, 30000, 500 ).name( 'Radius (m)' ).onChange( applySector );
 	scF.add( S, 'sectorStartAngle', 0, 360, 1 ).name( 'Start Angle' ).onChange( applySector );
-	scF.add( S, 'sectorAngle', 1, 360, 1 ).name( 'Sector Angle' ).onChange( applySector );
+	scF.add( S, 'sectorAngle', - 360, 360, 1 ).name( 'Sector Angle' ).onChange( applySector );
 	addVisibleToggle( scF, 'sector', applySector );
 
 	const ciF = gui.addFolder( 'Circle' );

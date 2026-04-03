@@ -25,21 +25,21 @@ export class PlotRectangle extends PlotBase {
 
 	}
 
-	getExtentPoints() {
+	// getExtentPoints() {
 
-		const p = this.options.points;
-		if ( ! p || p.length === 0 ) return [];
-		const lon = p[ 0 ][ 0 ], lat = p[ 0 ][ 1 ];
-		const hw = ( this.options.width || 0 ) / 2;
-		const hh = ( this.options.height || 0 ) / 2;
-		const dLon = hw / ( 111320 * Math.cos( lat * DEG2RAD ) );
-		const dLat = hh / 111320;
-		return [
-			[ lon, lat ],
-			[ lon - dLon, lat - dLat ],
-			[ lon + dLon, lat + dLat ],
-		];
+	// 	const p = this.options.points;
+	// 	if ( ! p || p.length === 0 ) return [];
+	// 	const lon = p[ 0 ][ 0 ], lat = p[ 0 ][ 1 ];
+	// 	const hw = ( this.options.width || 0 ) / 2;
+	// 	const hh = ( this.options.height || 0 ) / 2;
+	// 	const dLon = hw / ( 111320 * Math.cos( lat * DEG2RAD ) );
+	// 	const dLat = hh / 111320;
+	// 	return [
+	// 		[ lon, lat ],
+	// 		[ lon - dLon, lat - dLat ],
+	// 		[ lon + dLon, lat + dLat ],
+	// 	];
 
-	}
+	// }
 
 }
