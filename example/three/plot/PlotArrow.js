@@ -4,7 +4,6 @@
  * 对齐 PlotArrowOptions = GisPlotBaseOptions & {
  *   strokeStyle: 'solid' | 'dashed',
  *   arrowType: 'straight' | 'curved' | 'fine' | 'attack',
- *   headSize: number,
  * }
  *
  * options.points = [[lon, lat], ...] 为控制点。

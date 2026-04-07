@@ -204,8 +204,15 @@ export function buildShapeData( shapes, tileBounds, options = {} ) {
 			if ( pts.length === 0 || ! labelTiles ) continue;
 			const tile = labelTiles.get( id );
 			if ( ! tile ) continue;
+			// Anchor offset relative to the geographic point:
+			//   center -> point at center of text quad
+			//   left   -> point at left edge   (text extends to the right)
+			//   right  -> point at right edge  (text extends to the left)
+			let anchorOffsetLon = 0;
+			if ( opts.textAlign === 'left' ) anchorOffsetLon = - tile.halfWDeg;
+			else if ( opts.textAlign === 'right' ) anchorOffsetLon = tile.halfWDeg;
 			arr.push( 4, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, op,
-				pts[ 0 ][ 0 ] - rLo, pts[ 0 ][ 1 ] - rLa,
+				pts[ 0 ][ 0 ] - rLo + anchorOffsetLon, pts[ 0 ][ 1 ] - rLa,
 				tile.halfWDeg, tile.halfHDeg,
 				tile.u0, tile.v0, tile.u1, tile.v1 );
 			shapeCount ++;
