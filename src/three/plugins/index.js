@@ -11,6 +11,7 @@ export * from './TileFlatteningPlugin.js';
 export * from './QuantizedMeshPlugin.js';
 export * from './images/ImageOverlayPlugin.js';
 export * from './images/sources/plot/index.js';
+export * from './PlotSdfPlugin.js';
 export * from './LoadRegionPlugin.js';
 export * from './DebugTilesPlugin.js';
 

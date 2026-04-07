@@ -1,11 +1,11 @@
 /**
  * touchGround.js — GroundDecalManager 测试/演示页面
  *
- * RTT 方案：标绘图形通过 PlotOverlay 渲染到瓦片纹理上，
- * 不需要 decals.render()，ImageOverlayPlugin 自动处理渲染。
+ * 屏幕空间 SDF 方案：标绘图形通过 PlotSdfPlugin 在瓦片片元着色器中
+ * 逐屏幕像素实时求值 SDF，放大到任意级别都保持清晰。
  */
 import { GlobeControls, TilesRenderer } from 'um-3d-tiles-renderer';
-import { CesiumIonAuthPlugin, QuantizedMeshPlugin, GLTFExtensionsPlugin, ImageOverlayPlugin, CesiumIonOverlay } from 'um-3d-tiles-renderer/plugins';
+import { CesiumIonAuthPlugin, QuantizedMeshPlugin, GLTFExtensionsPlugin, ImageOverlayPlugin, CesiumIonOverlay, PlotSdfPlugin } from 'um-3d-tiles-renderer/plugins';
 import {
 	Scene,
 	WebGLRenderer,
@@ -22,7 +22,7 @@ import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 import { GroundDecalManager } from './GroundDecalManager.js';
 
 let camera, controls, scene, renderer, tiles, imageryOverlay;
-let decals;
+let decals, plotPlugin;
 
 const raycaster = new Raycaster();
 const mouse = new Vector2();
@@ -111,6 +111,8 @@ const S = {
 	textContent: '思茅区',
 	textFontColor: '#ffffff',
 	textFontSize: 64,
+	textFillColor: '#000000',
+	textFillOpacity: 60,
 	textStrokeColor: '#000000',
 	textStrokeWidth: 5,
 	textVisible: true,
@@ -170,11 +172,14 @@ function reinstantiateTiles() {
 		color: '#ffffff',
 	} );
 
-	// 标绘 overlay 和底图 overlay 一起注册（标绘在底图之上）
 	tiles.registerPlugin( new ImageOverlayPlugin( {
 		renderer,
-		overlays: [ imageryOverlay, decals.overlay ],
+		overlays: [ imageryOverlay ],
+		resolution: 512,
 	} ) );
+
+	plotPlugin = new PlotSdfPlugin( { shapes: decals._items } );
+	tiles.registerPlugin( plotPlugin );
 
 	tiles.group.rotation.x = - Math.PI / 2;
 
@@ -288,6 +293,8 @@ function applyText() {
 		content: S.textContent,
 		fontColor: S.textFontColor,
 		fontSize: S.textFontSize,
+		fillColor: S.textFillColor,
+		fillOpacity: S.textFillOpacity,
 		strokeColor: S.textStrokeColor,
 		strokeWidth: S.textStrokeWidth,
 		visible: S.textVisible,
@@ -417,6 +424,7 @@ function addDemoText() {
 	return decals.addText( {
 		points: [[ 100.848518, 22.732947 ]],
 		content: S.textContent, fontColor: S.textFontColor, fontSize: S.textFontSize,
+		fillColor: S.textFillColor, fillOpacity: S.textFillOpacity,
 		strokeColor: S.textStrokeColor, strokeWidth: S.textStrokeWidth,
 		visible: S.textVisible,
 	} );
@@ -461,6 +469,17 @@ function init() {
 
 	// ── 创建标绘 ──
 	decals = new GroundDecalManager( { renderer } );
+	decals._markDirty = function () {
+
+		if ( this._redrawTimer ) return;
+		this._redrawTimer = requestAnimationFrame( () => {
+
+			this._redrawTimer = null;
+			if ( plotPlugin ) plotPlugin.redraw();
+
+		} );
+
+	};
 
 	shapeIds.pointId = addDemoPoint();
 	shapeIds.lineId = addDemoLine();
@@ -489,7 +508,16 @@ function init() {
 	ionFolder.add( params, 'reload' );
 
 	const globalFolder = gui.addFolder( 'Global' );
-	globalFolder.add( S, 'globalOpacity', 0, 1, 0.05 ).name( 'Opacity' ).onChange( v => decals.setGlobalOpacity( v ) );
+	globalFolder.add( S, 'globalOpacity', 0, 1, 0.05 ).name( 'Opacity' ).onChange( v => {
+
+		if ( plotPlugin ) {
+
+			plotPlugin.opacity = v;
+			plotPlugin.redraw();
+
+		}
+
+	} );
 
 	const ptF = gui.addFolder( 'Point' );
 	ptF.add( S, 'pointStyle', [ 'circle', 'square' ] ).name( 'Style' ).onChange( applyPoint );
@@ -533,7 +561,9 @@ function init() {
 	const txF = gui.addFolder( 'Text' );
 	txF.add( S, 'textContent' ).name( 'Content' ).onFinishChange( applyText );
 	txF.addColor( S, 'textFontColor' ).name( 'Font Color' ).onChange( applyText );
-	txF.add( S, 'textFontSize', 16, 128, 4 ).name( 'Font Size' ).onChange( applyText );
+	txF.add( S, 'textFontSize', 12, 128, 4 ).name( 'Font Size' ).onChange( applyText );
+	txF.addColor( S, 'textFillColor' ).name( 'BG Color' ).onChange( applyText );
+	txF.add( S, 'textFillOpacity', 0, 100, 1 ).name( 'BG Opacity' ).onChange( applyText );
 	txF.addColor( S, 'textStrokeColor' ).name( 'Outline' ).onChange( applyText );
 	txF.add( S, 'textStrokeWidth', 0, 15, 1 ).name( 'Outline Width' ).onChange( applyText );
 	addVisibleToggle( txF, 'text', applyText );
