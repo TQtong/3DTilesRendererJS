@@ -249,7 +249,16 @@ void main() {
 
 			d -= hw;
 
-			if ( dashLen > 0.0 ) {
+			if ( gapLen < 0.0 ) {
+
+				// dotted: replace strip distance with round-dot SDF
+				float spacing = - gapLen;
+				float halfSp = spacing * 0.5;
+				float arcPhase = mod( arcPos + halfSp, spacing ) - halfSp;
+				float perpD = d + hw; // recover perpendicular distance to line
+				d = length( vec2( arcPhase, perpD ) ) - hw;
+
+			} else if ( dashLen > 0.0 ) {
 
 				float cycle = dashLen + gapLen;
 				float phase = mod( arcPos, cycle );
@@ -610,7 +619,16 @@ export const PLOT_SDF_EVALUATE = /* glsl */ `
 
 			d -= hw;
 
-			if ( dashLen > 0.0 ) {
+			if ( gapLen < 0.0 ) {
+
+				// dotted: replace strip distance with round-dot SDF
+				float spacing = - gapLen;
+				float halfSp = spacing * 0.5;
+				float arcPhase = mod( arcPos + halfSp, spacing ) - halfSp;
+				float perpD = d + hw; // recover perpendicular distance to line
+				d = length( vec2( arcPhase, perpD ) ) - hw;
+
+			} else if ( dashLen > 0.0 ) {
 
 				float cycle = dashLen + gapLen;
 				float phase = mod( arcPos, cycle );

@@ -418,14 +418,16 @@ export class PlotImageSource extends RegionImageSource {
 				for ( const c of pts ) sumLat += c[ 1 ];
 				const cosMidLat = Math.cos( ( sumLat / vc ) * DEG2RAD );
 
-				// Fixed real-world dash pattern: 10 m dash + 10 m gap (dotted: 2 m / 4 m).
+				// Real-world stroke pattern. Encoding:
+				//   gapLen > 0: dashed (rect strips). dashLen=on meters, gapLen=off meters.
+				//   gapLen < 0: dotted (round dots).  |gapLen|=center-to-center spacing in meters.
 				let dashLen_m = 0, gapLen_m = 0;
 				if ( opts.strokeStyle === 'dashed' ) {
 					dashLen_m = 10;
 					gapLen_m  = 10;
 				} else if ( opts.strokeStyle === 'dotted' ) {
-					dashLen_m = 2;
-					gapLen_m  = 4;
+					dashLen_m = 0;
+					gapLen_m  = - 5;
 				}
 
 				const total = 19 + vc * 2;
