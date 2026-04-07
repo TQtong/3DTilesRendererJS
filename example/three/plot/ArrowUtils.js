@@ -327,25 +327,6 @@ export function getQBSplinePoints( points ) {
 // 每个函数返回 [lon, lat] 对数组，构成闭合多边形，供 polygon SDF (type 2) 渲染。
 
 /**
- * 直线箭头（线型）：起点→终点连线 + 末端 30° 翼。
- * 输出为线条顶点序列（非闭合多边形），仅用于 createCurvedArrow 的 2 点退化情况。
- *
- * @param p1 - 起点 [lon, lat]
- * @param p2 - 终点 [lon, lat]
- * @param headSize - 箭头头部大小参数
- */
-export function createStraightArrow( p1, p2, headSize ) {
-
-	const distance = MathDistance( p1, p2 );
-	let len = distance / 5;
-	len = Math.min( len, headSize > 0 ? headSize * 0.01 : len );
-	const leftPnt = getThirdPoint( p1, p2, Math.PI / 6, len / 2, false );
-	const rightPnt = getThirdPoint( p1, p2, Math.PI / 6, len / 2, true );
-	return [ p1, p2, leftPnt, p2, rightPnt ];
-
-}
-
-/**
  * 细箭头（多边形型）：两点定义一个有宽度的填充箭头。
  *
  * 形状结构（8 个顶点的闭合多边形）：

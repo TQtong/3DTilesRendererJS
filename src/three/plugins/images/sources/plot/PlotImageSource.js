@@ -481,8 +481,11 @@ export class PlotImageSource extends RegionImageSource {
 				if ( pts.length === 0 ) continue;
 				const tile = this._labelTiles.get( id );
 				if ( ! tile ) continue;
+				let anchorOffsetLon = 0;
+				if ( opts.textAlign === 'left' ) anchorOffsetLon = - tile.halfWDeg;
+				else if ( opts.textAlign === 'right' ) anchorOffsetLon = tile.halfWDeg;
 				arr.push( 4, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, op,
-					pts[ 0 ][ 0 ], pts[ 0 ][ 1 ], tile.halfWDeg, tile.halfHDeg,
+					pts[ 0 ][ 0 ] + anchorOffsetLon, pts[ 0 ][ 1 ], tile.halfWDeg, tile.halfHDeg,
 					tile.u0, tile.v0, tile.u1, tile.v1 );
 				shapeCount ++;
 
@@ -554,23 +557,31 @@ export class PlotImageSource extends RegionImageSource {
 			if ( cursorY + th > LABEL_ATLAS_SIZE ) break;
 
 			const tx = cursorX, ty = cursorY;
-			const cx = tx + tw / 2, cy = ty + th / 2;
+			const cy = ty + th / 2;
+			const align = opts.textAlign || 'center';
+
+			// Anchor x must match textAlign so the text stays within the tile.
+			//   center -> middle of tile,  left -> left edge + pad,  right -> right edge - pad
+			let ax;
+			if ( align === 'left' ) ax = tx + pad;
+			else if ( align === 'right' ) ax = tx + tw - pad;
+			else ax = tx + tw / 2;
 
 			ctx.font = font;
-			ctx.textAlign = opts.textAlign || 'center';
+			ctx.textAlign = align;
 			ctx.textBaseline = 'middle';
 
 			if ( opts.strokeColor && ( opts.strokeWidth || 0 ) > 0 ) {
 
 				ctx.strokeStyle = opts.strokeColor;
 				ctx.lineWidth = opts.strokeWidth || 4;
-				ctx.strokeText( opts.content || '', cx, cy );
+				ctx.strokeText( opts.content || '', ax, cy );
 
 			}
 
 			ctx.fillStyle = opts.fontColor || opts.fillColor || '#ffffff';
 			ctx.globalAlpha = 1;
-			ctx.fillText( opts.content || '', cx, cy );
+			ctx.fillText( opts.content || '', ax, cy );
 
 			const cLat = ( opts.points && opts.points[ 0 ] ) ? opts.points[ 0 ][ 1 ] : 0;
 			const metersPerDegLon = 111320 * Math.cos( cLat * DEG2RAD );

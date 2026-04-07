@@ -482,8 +482,6 @@ export class PlotSdfPlugin {
 		ctx.clearRect( 0, 0, LABEL_ATLAS_SIZE, LABEL_ATLAS_SIZE );
 
 		let cursorX = 0, cursorY = 0, rowH = 0;
-		const S = LABEL_RENDER_SCALE;
-		const mPerCanvasPx = LABEL_M_PER_PX / S;
 
 		for ( const [ id, shape ] of this.shapes ) {
 
@@ -491,15 +489,33 @@ export class PlotSdfPlugin {
 			const opts = shape.options;
 
 			const fontSize = opts.fontSize || 48;
-			const renderSize = fontSize * S;
-			const font = renderSize + 'px sans-serif';
-			const strokeW = ( opts.strokeWidth || 4 ) * S;
-			const pad = strokeW + 6 * S;
+			let S = LABEL_RENDER_SCALE;
+			let renderSize = fontSize * S;
+			let strokeW = ( opts.strokeWidth || 4 ) * S;
+			let pad = strokeW + 6 * S;
 
-			ctx.font = font;
-			const metrics = ctx.measureText( opts.content || '' );
-			const tw = Math.ceil( metrics.width + pad * 2 );
-			const th = Math.ceil( renderSize * 1.4 + pad * 2 );
+			ctx.font = renderSize + 'px sans-serif';
+			let metrics = ctx.measureText( opts.content || '' );
+			let tw = Math.ceil( metrics.width + pad * 2 );
+			let th = Math.ceil( renderSize * 1.4 + pad * 2 );
+
+			// Per-shape clamp: if either dimension exceeds the atlas, scale S down so it fits.
+			if ( tw > LABEL_ATLAS_SIZE || th > LABEL_ATLAS_SIZE ) {
+
+				const ratio = Math.min( ( LABEL_ATLAS_SIZE - 1 ) / tw, ( LABEL_ATLAS_SIZE - 1 ) / th );
+				S = Math.max( 0.1, S * ratio );
+				renderSize = fontSize * S;
+				strokeW = ( opts.strokeWidth || 4 ) * S;
+				pad = strokeW + 6 * S;
+				ctx.font = renderSize + 'px sans-serif';
+				metrics = ctx.measureText( opts.content || '' );
+				tw = Math.ceil( metrics.width + pad * 2 );
+				th = Math.ceil( renderSize * 1.4 + pad * 2 );
+
+			}
+
+			const font = renderSize + 'px sans-serif';
+			const mPerCanvasPx = LABEL_M_PER_PX / S;
 
 			if ( cursorX + tw > LABEL_ATLAS_SIZE ) {
 
@@ -512,10 +528,17 @@ export class PlotSdfPlugin {
 			if ( cursorY + th > LABEL_ATLAS_SIZE ) break;
 
 			const tx = cursorX, ty = cursorY;
-			const cx = tx + tw / 2, cy = ty + th / 2;
+			const cy = ty + th / 2;
+			const align = opts.textAlign || 'center';
+
+			// Anchor x must match textAlign so the text stays inside the tile rect.
+			let ax;
+			if ( align === 'left' ) ax = tx + pad;
+			else if ( align === 'right' ) ax = tx + tw - pad;
+			else ax = tx + tw / 2;
 
 			ctx.font = font;
-			ctx.textAlign = opts.textAlign || 'center';
+			ctx.textAlign = align;
 			ctx.textBaseline = 'middle';
 
 			if ( opts.fillColor ) {
@@ -532,12 +555,12 @@ export class PlotSdfPlugin {
 
 				ctx.strokeStyle = opts.strokeColor;
 				ctx.lineWidth = strokeW;
-				ctx.strokeText( opts.content || '', cx, cy );
+				ctx.strokeText( opts.content || '', ax, cy );
 
 			}
 
 			ctx.fillStyle = opts.fontColor || '#ffffff';
-			ctx.fillText( opts.content || '', cx, cy );
+			ctx.fillText( opts.content || '', ax, cy );
 
 			const cLat = ( opts.points && opts.points[ 0 ] ) ? opts.points[ 0 ][ 1 ] : 0;
 			const metersPerDegLon = 111320 * Math.cos( cLat * DEG2RAD );

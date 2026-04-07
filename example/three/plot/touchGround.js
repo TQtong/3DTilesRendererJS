@@ -104,7 +104,6 @@ const S = {
 	arrowStrokeColor: '#1D4ED8',
 	arrowStrokeWidth: 2,
 	arrowStrokeOpacity: 100,
-	arrowHeadSize: 16,
 	arrowVisible: true,
 
 	textContent: '思茅区',
@@ -114,6 +113,7 @@ const S = {
 	textFillOpacity: 60,
 	textStrokeColor: '#000000',
 	textStrokeWidth: 5,
+	textAlign: 'center',
 	textVisible: true,
 };
 
@@ -295,6 +295,7 @@ function applyText() {
 		fillOpacity: S.textFillOpacity,
 		strokeColor: S.textStrokeColor,
 		strokeWidth: S.textStrokeWidth,
+		textAlign: S.textAlign,
 		visible: S.textVisible,
 	} );
 
@@ -310,7 +311,6 @@ function applyArrow() {
 		strokeWidth: S.arrowStrokeWidth,
 		strokeOpacity: S.arrowStrokeOpacity,
 		arrowType: S.arrowType,
-		headSize: S.arrowHeadSize,
 		visible: S.arrowVisible,
 	} );
 
@@ -424,6 +424,7 @@ function addDemoText() {
 		content: S.textContent, fontColor: S.textFontColor, fontSize: S.textFontSize,
 		fillColor: S.textFillColor, fillOpacity: S.textFillOpacity,
 		strokeColor: S.textStrokeColor, strokeWidth: S.textStrokeWidth,
+		textAlign: S.textAlign,
 		visible: S.textVisible,
 	} );
 
@@ -433,7 +434,7 @@ function addDemoArrow() {
 
 	return decals.addArrow( {
 		points: [[ 100.50, 22.70 ], [ 100.60, 22.78 ], [ 100.75, 22.60 ]],
-		arrowType: S.arrowType, headSize: S.arrowHeadSize,
+		arrowType: S.arrowType,
 		fillColor: S.arrowFillColor, fillOpacity: S.arrowFillOpacity,
 		strokeColor: S.arrowStrokeColor, strokeWidth: S.arrowStrokeWidth, strokeOpacity: S.arrowStrokeOpacity,
 		visible: S.arrowVisible,
@@ -563,13 +564,13 @@ function init() {
 	txF.add( S, 'textFillOpacity', 0, 100, 1 ).name( 'BG Opacity' ).onChange( applyText );
 	txF.addColor( S, 'textStrokeColor' ).name( 'Outline' ).onChange( applyText );
 	txF.add( S, 'textStrokeWidth', 0, 15, 1 ).name( 'Outline Width' ).onChange( applyText );
+	txF.add( S, 'textAlign', [ 'left', 'center', 'right' ] ).name( 'Align' ).onChange( applyText );
 	addVisibleToggle( txF, 'text', applyText );
 
 	const arF = gui.addFolder( 'Arrow' );
 	arF.add( S, 'arrowType', [ 'fine', 'curved', 'attack', 'straight' ] ).name( 'Type' ).onChange( applyArrow );
 	addFillControls( arF, 'arrow', applyArrow );
 	addStrokeControls( arF, 'arrow', applyArrow );
-	arF.add( S, 'arrowHeadSize', 1, 50, 1 ).name( 'Head Size' ).onChange( applyArrow );
 	addVisibleToggle( arF, 'arrow', applyArrow );
 
 	// ── Delete / Re-add ──
