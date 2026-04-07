@@ -59,6 +59,7 @@ const S = {
 	pointStrokeOpacity: 100,
 	pointVisible: true,
 
+	lineStrokeStyle: 'solid',
 	lineStrokeColor: '#ff00ff',
 	lineStrokeWidth: 8,
 	lineStrokeOpacity: 90,
@@ -209,6 +210,7 @@ function applyLine() {
 
 	if ( shapeIds.lineId == null ) return;
 	decals.setStyle( shapeIds.lineId, {
+		strokeStyle: S.lineStrokeStyle,
 		strokeColor: S.lineStrokeColor,
 		strokeWidth: S.lineStrokeWidth,
 		strokeOpacity: S.lineStrokeOpacity,
@@ -350,6 +352,7 @@ function addDemoLine() {
 
 	return decals.addLine( {
 		points: [[ 100.50, 22.85 ], [ 100.60, 22.90 ], [ 100.70, 22.87 ], [ 100.80, 22.92 ], [ 100.90, 22.88 ]],
+		strokeStyle: S.lineStrokeStyle,
 		strokeColor: S.lineStrokeColor, strokeWidth: S.lineStrokeWidth, strokeOpacity: S.lineStrokeOpacity,
 		startArrowStyle: null, endArrowStyle: 'filled', arrowSize: S.lineArrowSize,
 		visible: S.lineVisible,
@@ -497,6 +500,7 @@ function init() {
 
 	const arrowOpts = [ 'none', 'filled', 'open', 'filledDiamond', 'openDiamond', 'filledCircle', 'openCircle', 'bar' ];
 	const lnF = gui.addFolder( 'Line' );
+	lnF.add( S, 'lineStrokeStyle', [ 'solid', 'dashed', 'dotted' ] ).name( 'Style' ).onChange( applyLine );
 	addStrokeControls( lnF, 'line', applyLine, 30 );
 	lnF.add( S, 'lineStartArrow', arrowOpts ).name( 'Start Arrow' ).onChange( applyLine );
 	lnF.add( S, 'lineEndArrow', arrowOpts ).name( 'End Arrow' ).onChange( applyLine );
@@ -517,7 +521,7 @@ function init() {
 	addFillControls( scF, 'sector', applySector );
 	addStrokeControls( scF, 'sector', applySector );
 	scF.add( S, 'sectorRadius', 500, 30000, 500 ).name( 'Radius (m)' ).onChange( applySector );
-	scF.add( S, 'sectorStartAngle', 0, 360, 1 ).name( 'Start Angle' ).onChange( applySector );
+	scF.add( S, 'sectorStartAngle', - 360, 360, 1 ).name( 'Start Angle' ).onChange( applySector );
 	scF.add( S, 'sectorAngle', - 360, 360, 1 ).name( 'Sector Angle' ).onChange( applySector );
 	addVisibleToggle( scF, 'sector', applySector );
 

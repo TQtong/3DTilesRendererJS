@@ -183,7 +183,7 @@ void main() {
 			applyFill( result, fc, d, aa, op );
 			applyStroke( result, sc, d, sw, aa, op );
 
-		// ── type 3: polyline + arrows ──
+		// ── type 3: polyline + arrows + dash ──
 		} else if ( type == 3 ) {
 
 			int   vc  = int( readF( off + 12 ) );
@@ -191,8 +191,12 @@ void main() {
 			int   sa  = int( readF( off + 14 ) );
 			int   ea  = int( readF( off + 15 ) );
 			float asz = readF( off + 16 );
-			int   vs  = off + 17;
+			float dashLen = readF( off + 17 );
+			float gapLen  = readF( off + 18 );
+			int   vs  = off + 19;
 			float d   = 1e10;
+			float arcPos = 0.0;
+			float cumLen = 0.0;
 
 			vec2 v0 = vec2( readF( vs ), readF( vs + 1 ) );
 			vec2 v1 = vec2( readF( vs + 2 ), readF( vs + 3 ) );
@@ -204,11 +208,31 @@ void main() {
 				if ( i >= vc - 1 ) break;
 				vec2 a = vec2( readF( vs + i * 2 ), readF( vs + i * 2 + 1 ) );
 				vec2 b = vec2( readF( vs + ( i + 1 ) * 2 ), readF( vs + ( i + 1 ) * 2 + 1 ) );
-				d = min( d, sdSeg( pos, a, b ) );
+				vec2 ab = b - a;
+				float segLen = length( ab );
+				float t = clamp( dot( pos - a, ab ) / dot( ab, ab ), 0.0, 1.0 );
+				float segD = length( pos - a - ab * t );
+
+				if ( segD < d ) {
+
+					d = segD;
+					arcPos = cumLen + t * segLen;
+
+				}
+
+				cumLen += segLen;
 
 			}
 
 			d -= hw;
+
+			if ( dashLen > 0.0 ) {
+
+				float cycle = dashLen + gapLen;
+				float phase = mod( arcPos, cycle );
+				if ( phase > dashLen ) d = max( d, aa );
+
+			}
 
 			if ( sa > 0 ) {
 

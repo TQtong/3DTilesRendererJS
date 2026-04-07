@@ -407,16 +407,31 @@ export class PlotImageSource extends RegionImageSource {
 
 				const vc = pts.length;
 				if ( vc < 2 ) continue;
-				const hwDeg = ( opts.strokeWidth || 3 ) * pxDeg / 2;
+				const sw = opts.strokeWidth || 3;
+				const hwDeg = sw * pxDeg / 2;
 				const sa = _arrowInt( opts.startArrowStyle );
 				const ea = _arrowInt( opts.endArrowStyle );
 				const aszDeg = ( opts.arrowSize || 0 ) * pxDeg;
-				const total = 17 + vc * 2;
+
+				let dashLenDeg = 0, gapLenDeg = 0;
+				if ( opts.strokeStyle === 'dashed' ) {
+
+					dashLenDeg = sw * pxDeg * 4;
+					gapLenDeg = sw * pxDeg * 3;
+
+				} else if ( opts.strokeStyle === 'dotted' ) {
+
+					dashLenDeg = sw * pxDeg * 1.5;
+					gapLenDeg = sw * pxDeg * 2;
+
+				}
+
+				const total = 19 + vc * 2;
 
 				const lineColor = _parseColor( opts.strokeColor || opts.fillColor || '#ffffff' );
 				lineColor[ 3 ] *= strokeOp;
 
-				arr.push( 3, total, lineColor[ 0 ], lineColor[ 1 ], lineColor[ 2 ], lineColor[ 3 ], 0, 0, 0, 0, 0, op, vc, hwDeg, sa, ea, aszDeg );
+				arr.push( 3, total, lineColor[ 0 ], lineColor[ 1 ], lineColor[ 2 ], lineColor[ 3 ], 0, 0, 0, 0, 0, op, vc, hwDeg, sa, ea, aszDeg, dashLenDeg, gapLenDeg );
 				for ( const c of pts ) arr.push( c[ 0 ], c[ 1 ] );
 				shapeCount ++;
 
