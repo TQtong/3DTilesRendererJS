@@ -408,22 +408,24 @@ export class PlotImageSource extends RegionImageSource {
 				const vc = pts.length;
 				if ( vc < 2 ) continue;
 				const sw = opts.strokeWidth || 3;
-				const hwDeg = sw * pxDeg / 2;
+				// Line per-pixel sizes are stored as raw pixels and converted to meters in shader.
+				const hwPx = sw / 2;
 				const sa = _arrowInt( opts.startArrowStyle );
 				const ea = _arrowInt( opts.endArrowStyle );
-				const aszDeg = ( opts.arrowSize || 0 ) * pxDeg;
+				// Arrow size is hardcoded in shader as 2x strokeWidth.
 
-				let dashLenDeg = 0, gapLenDeg = 0;
+				let sumLat = 0;
+				for ( const c of pts ) sumLat += c[ 1 ];
+				const cosMidLat = Math.cos( ( sumLat / vc ) * DEG2RAD );
+
+				// Fixed real-world dash pattern: 10 m dash + 10 m gap (dotted: 2 m / 4 m).
+				let dashLen_m = 0, gapLen_m = 0;
 				if ( opts.strokeStyle === 'dashed' ) {
-
-					dashLenDeg = sw * pxDeg * 4;
-					gapLenDeg = sw * pxDeg * 3;
-
+					dashLen_m = 10;
+					gapLen_m  = 10;
 				} else if ( opts.strokeStyle === 'dotted' ) {
-
-					dashLenDeg = sw * pxDeg * 1.5;
-					gapLenDeg = sw * pxDeg * 2;
-
+					dashLen_m = 2;
+					gapLen_m  = 4;
 				}
 
 				const total = 19 + vc * 2;
@@ -431,7 +433,7 @@ export class PlotImageSource extends RegionImageSource {
 				const lineColor = _parseColor( opts.strokeColor || opts.fillColor || '#ffffff' );
 				lineColor[ 3 ] *= strokeOp;
 
-				arr.push( 3, total, lineColor[ 0 ], lineColor[ 1 ], lineColor[ 2 ], lineColor[ 3 ], 0, 0, 0, 0, 0, op, vc, hwDeg, sa, ea, aszDeg, dashLenDeg, gapLenDeg );
+				arr.push( 3, total, lineColor[ 0 ], lineColor[ 1 ], lineColor[ 2 ], lineColor[ 3 ], 0, 0, 0, 0, 0, op, vc, hwPx, sa, ea, dashLen_m, gapLen_m, cosMidLat );
 				for ( const c of pts ) arr.push( c[ 0 ], c[ 1 ] );
 				shapeCount ++;
 
@@ -720,7 +722,8 @@ function _parseColor( color ) {
 function _arrowInt( style ) {
 
 	if ( ! style ) return 0;
-	return { 'filled': 1, 'open': 2, 'filledDiamond': 3, 'openDiamond': 4, 'filledCircle': 5, 'openCircle': 6, 'bar': 7 }[ style ] || 0;
+	// Supported styles only. Shader branches: 1=triangle, 3=diamond, 5=circle, 7=bar.
+	return { 'filledArrow': 1, 'filledDiamond': 3, 'filledCircle': 5, 'bar': 7 }[ style ] || 0;
 
 }
 

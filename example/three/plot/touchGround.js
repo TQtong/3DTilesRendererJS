@@ -64,8 +64,7 @@ const S = {
 	lineStrokeWidth: 8,
 	lineStrokeOpacity: 90,
 	lineStartArrow: 'none',
-	lineEndArrow: 'filled',
-	lineArrowSize: 20,
+	lineEndArrow: 'filledArrow',
 	lineVisible: true,
 
 	polyFillColor: '#3B82F6',
@@ -221,7 +220,6 @@ function applyLine() {
 		strokeOpacity: S.lineStrokeOpacity,
 		startArrowStyle: S.lineStartArrow === 'none' ? null : S.lineStartArrow,
 		endArrowStyle: S.lineEndArrow === 'none' ? null : S.lineEndArrow,
-		arrowSize: S.lineArrowSize,
 		visible: S.lineVisible,
 	} );
 
@@ -361,7 +359,7 @@ function addDemoLine() {
 		points: [[ 100.50, 22.85 ], [ 100.60, 22.90 ], [ 100.70, 22.87 ], [ 100.80, 22.92 ], [ 100.90, 22.88 ]],
 		strokeStyle: S.lineStrokeStyle,
 		strokeColor: S.lineStrokeColor, strokeWidth: S.lineStrokeWidth, strokeOpacity: S.lineStrokeOpacity,
-		startArrowStyle: null, endArrowStyle: 'filled', arrowSize: S.lineArrowSize,
+		startArrowStyle: null, endArrowStyle: 'filledArrow',
 		visible: S.lineVisible,
 	} );
 
@@ -526,13 +524,12 @@ function init() {
 	addStrokeControls( ptF, 'point', applyPoint );
 	addVisibleToggle( ptF, 'point', applyPoint );
 
-	const arrowOpts = [ 'none', 'filled', 'open', 'filledDiamond', 'openDiamond', 'filledCircle', 'openCircle', 'bar' ];
+	const arrowOpts = [ 'none', 'filledArrow', 'filledDiamond', 'filledCircle', 'bar' ];
 	const lnF = gui.addFolder( 'Line' );
 	lnF.add( S, 'lineStrokeStyle', [ 'solid', 'dashed', 'dotted' ] ).name( 'Style' ).onChange( applyLine );
 	addStrokeControls( lnF, 'line', applyLine, 30 );
 	lnF.add( S, 'lineStartArrow', arrowOpts ).name( 'Start Arrow' ).onChange( applyLine );
 	lnF.add( S, 'lineEndArrow', arrowOpts ).name( 'End Arrow' ).onChange( applyLine );
-	lnF.add( S, 'lineArrowSize', 5, 60, 1 ).name( 'Arrow Size' ).onChange( applyLine );
 	addVisibleToggle( lnF, 'line', applyLine );
 
 	const pgF = gui.addFolder( 'Polygon' );

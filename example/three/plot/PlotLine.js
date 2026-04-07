@@ -9,7 +9,7 @@
  *   endArrowStyle: PlotArrowStyle | null,
  * }
  *
- * 额外扩展：arrowSize（箭头大小，SDF 渲染需要）。
+ * 箭头大小固定为 strokeWidth × 2，由 shader 内部处理。
  * options.points = [[lon, lat], ...] 为折线顶点。
  * shader type 3。
  */

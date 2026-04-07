@@ -76,14 +76,18 @@ float sdTri( vec2 p, vec2 a, vec2 b, vec2 c ) {
 float arrowSdf( vec2 local, int style, float sz, float hw ) {
 	float w = sz * 0.45;
 	float ov = hw * 2.0;
-	if ( style == 1 || style == 2 ) {
+	// 1 = filledArrow (triangle), 3 = filledDiamond, 5 = filledCircle, 7 = bar.
+	if ( style == 1 ) {
 		return sdTri( local, vec2( sz, 0.0 ), vec2( - ov, w ), vec2( - ov, - w ) );
-	} else if ( style == 3 || style == 4 ) {
+	} else if ( style == 3 ) {
+		// Proper rhombus SDF (Inigo Quilez), in the same units as local.
 		vec2 shifted = vec2( local.x + ov * 0.5, local.y );
-		vec2 al = abs( shifted );
-		float hs = ( sz + ov ) * 0.5;
-		return ( al.x / hs + al.y / w ) - 1.0;
-	} else if ( style == 5 || style == 6 ) {
+		vec2 b = vec2( ( sz + ov ) * 0.5, w );
+		vec2 q = abs( shifted );
+		float h = clamp( ( ( b.x - 2.0 * q.x ) * b.x - ( b.y - 2.0 * q.y ) * b.y ) / dot( b, b ), - 1.0, 1.0 );
+		float dist = length( q - 0.5 * b * vec2( 1.0 - h, 1.0 + h ) );
+		return dist * sign( q.x * b.y + q.y * b.x - b.x * b.y );
+	} else if ( style == 5 ) {
 		return length( local ) - sz * 0.4;
 	} else if ( style == 7 ) {
 		return sdBox( local, vec2( sz * 0.08, w ) );
@@ -191,32 +195,46 @@ void main() {
 		// ── type 3: polyline + arrows + dash ──
 		} else if ( type == 3 ) {
 
-			int   vc  = int( readF( off + 12 ) );
-			float hw  = readF( off + 13 );
-			int   sa  = int( readF( off + 14 ) );
-			int   ea  = int( readF( off + 15 ) );
-			float asz = readF( off + 16 );
-			float dashLen = readF( off + 17 );
-			float gapLen  = readF( off + 18 );
-			int   vs  = off + 19;
+			int   vc      = int( readF( off + 12 ) );
+			int   sa      = int( readF( off + 14 ) );
+			int   ea      = int( readF( off + 15 ) );
+			float cosLat  = readF( off + 18 );
+			int   vs      = off + 19;
+
+			// Stored sizes are in pixels; convert to meters via tile texel size.
+			float tileCos = cos( ( uTileBounds.y + uTileBounds.w ) * 0.5 * 0.017453293 );
+			float tileMpp = ( ( uTileBounds.z - uTileBounds.x ) * tileCos * 111320.0 ) / uResolution;
+			float aaM     = tileMpp * 1.5;
+
+			float hw      = readF( off + 13 ) * tileMpp;
+			// Arrow size hardcoded: arrowSize = 3 * strokeWidth = 6 * hw.
+			float asz     = hw * 6.0;
+			// dashLen / gapLen are already in meters (intrinsic to the polyline).
+			float dashLen = readF( off + 16 );
+			float gapLen  = readF( off + 17 );
+
+			vec2 toM = vec2( cosLat, 1.0 ) * 111320.0;
+			vec2 origin = uTileBounds.xy;
+			vec2 posM = ( pos - origin ) * toM;
+
+			vec2 v0 = ( vec2( readF( vs ),     readF( vs + 1 ) )                                 - origin ) * toM;
+			vec2 v1 = ( vec2( readF( vs + 2 ), readF( vs + 3 ) )                                 - origin ) * toM;
+			vec2 vL = ( vec2( readF( vs + ( vc - 1 ) * 2 ), readF( vs + ( vc - 1 ) * 2 + 1 ) ) - origin ) * toM;
+			vec2 vP = ( vec2( readF( vs + ( vc - 2 ) * 2 ), readF( vs + ( vc - 2 ) * 2 + 1 ) ) - origin ) * toM;
+
 			float d   = 1e10;
 			float arcPos = 0.0;
 			float cumLen = 0.0;
 
-			vec2 v0 = vec2( readF( vs ), readF( vs + 1 ) );
-			vec2 v1 = vec2( readF( vs + 2 ), readF( vs + 3 ) );
-			vec2 vL = vec2( readF( vs + ( vc - 1 ) * 2 ), readF( vs + ( vc - 1 ) * 2 + 1 ) );
-			vec2 vP = vec2( readF( vs + ( vc - 2 ) * 2 ), readF( vs + ( vc - 2 ) * 2 + 1 ) );
-
 			for ( int i = 0; i < 63; i ++ ) {
 
 				if ( i >= vc - 1 ) break;
-				vec2 a = vec2( readF( vs + i * 2 ), readF( vs + i * 2 + 1 ) );
-				vec2 b = vec2( readF( vs + ( i + 1 ) * 2 ), readF( vs + ( i + 1 ) * 2 + 1 ) );
+				vec2 a = ( vec2( readF( vs + i * 2 ),         readF( vs + i * 2 + 1 ) )         - origin ) * toM;
+				vec2 b = ( vec2( readF( vs + ( i + 1 ) * 2 ), readF( vs + ( i + 1 ) * 2 + 1 ) ) - origin ) * toM;
 				vec2 ab = b - a;
 				float segLen = length( ab );
-				float t = clamp( dot( pos - a, ab ) / dot( ab, ab ), 0.0, 1.0 );
-				float segD = length( pos - a - ab * t );
+				float t = clamp( dot( posM - a, ab ) / dot( ab, ab ), 0.0, 1.0 );
+				float segD = length( posM - a - ab * t );
 
 				if ( segD < d ) {
 
@@ -235,20 +253,20 @@ void main() {
 
 				float cycle = dashLen + gapLen;
 				float phase = mod( arcPos, cycle );
-				if ( phase > dashLen ) d = max( d, aa );
+				if ( phase > dashLen ) d = max( d, aaM );
 
 			}
 
 			if ( sa > 0 ) {
 
-				float beyond = - dot( pos - v0, normalize( v1 - v0 ) );
+				float beyond = - dot( posM - v0, normalize( v1 - v0 ) );
 				if ( beyond > 0.0 ) d = max( d, beyond );
 
 			}
 
 			if ( ea > 0 ) {
 
-				float beyond = - dot( pos - vL, normalize( vP - vL ) );
+				float beyond = - dot( posM - vL, normalize( vP - vL ) );
 				if ( beyond > 0.0 ) d = max( d, beyond );
 
 			}
@@ -258,7 +276,7 @@ void main() {
 			if ( sa > 0 && asz > 0.0 ) {
 
 				vec2 dr = normalize( v0 - v1 );
-				vec2 lc = vec2( dot( pos - v0, dr ), dot( pos - v0, vec2( - dr.y, dr.x ) ) );
+				vec2 lc = vec2( dot( posM - v0, dr ), dot( posM - v0, vec2( - dr.y, dr.x ) ) );
 				arrowD = min( arrowD, arrowSdf( lc, sa, asz, hw ) );
 
 			}
@@ -266,7 +284,7 @@ void main() {
 			if ( ea > 0 && asz > 0.0 ) {
 
 				vec2 dr = normalize( vL - vP );
-				vec2 lc = vec2( dot( pos - vL, dr ), dot( pos - vL, vec2( - dr.y, dr.x ) ) );
+				vec2 lc = vec2( dot( posM - vL, dr ), dot( posM - vL, vec2( - dr.y, dr.x ) ) );
 				arrowD = min( arrowD, arrowSdf( lc, ea, asz, hw ) );
 
 			}
@@ -274,28 +292,28 @@ void main() {
 			bool arrowFilled = ( sa == 1 || sa == 3 || sa == 5 || ea == 1 || ea == 3 || ea == 5 );
 			float combined = min( d, arrowD );
 
-			if ( combined < aa ) {
+			if ( combined < aaM ) {
 
 				vec4 lc = sc.w > 0.001 ? sc : fc;
 
-				if ( arrowFilled && arrowD < d && arrowD < aa ) {
+				if ( arrowFilled && arrowD < d && arrowD < aaM ) {
 
-					applyFill( result, lc, arrowD, aa, op );
-					applyStroke( result, lc, arrowD, sw, aa, op );
+					applyFill( result, lc, arrowD, aaM, op );
+					applyStroke( result, lc, arrowD, sw, aaM, op );
 
 				} else {
 
-					float m = 1.0 - smoothstep( - aa, 0.0, combined );
+					float m = 1.0 - smoothstep( - aaM, 0.0, combined );
 					result = mix( result, vec4( lc.rgb, 1.0 ), max( lc.w, fc.w ) * op * m );
 
 				}
 
 			}
 
-			if ( arrowD < aa && ! arrowFilled ) {
+			if ( arrowD < aaM && ! arrowFilled ) {
 
 				vec4 lc = sc.w > 0.001 ? sc : fc;
-				applyStroke( result, lc, arrowD, sw * 0.5, aa, op );
+				applyStroke( result, lc, arrowD, sw * 0.5, aaM, op );
 
 			}
 
@@ -421,14 +439,18 @@ float plotSdTri( vec2 p, vec2 a, vec2 b, vec2 c ) {
 float plotArrowSdf( vec2 local, int style, float sz, float hw ) {
 	float w = sz * 0.45;
 	float ov = hw * 2.0;
-	if ( style == 1 || style == 2 ) {
+	// 1 = filledArrow (triangle), 3 = filledDiamond, 5 = filledCircle, 7 = bar.
+	if ( style == 1 ) {
 		return plotSdTri( local, vec2( sz, 0.0 ), vec2( - ov, w ), vec2( - ov, - w ) );
-	} else if ( style == 3 || style == 4 ) {
+	} else if ( style == 3 ) {
+		// Proper rhombus SDF (Inigo Quilez), in the same units as local.
 		vec2 shifted = vec2( local.x + ov * 0.5, local.y );
-		vec2 al = abs( shifted );
-		float hs = ( sz + ov ) * 0.5;
-		return ( al.x / hs + al.y / w ) - 1.0;
-	} else if ( style == 5 || style == 6 ) {
+		vec2 b = vec2( ( sz + ov ) * 0.5, w );
+		vec2 q = abs( shifted );
+		float h = clamp( ( ( b.x - 2.0 * q.x ) * b.x - ( b.y - 2.0 * q.y ) * b.y ) / dot( b, b ), - 1.0, 1.0 );
+		float dist = length( q - 0.5 * b * vec2( 1.0 - h, 1.0 + h ) );
+		return dist * sign( q.x * b.y + q.y * b.x - b.x * b.y );
+	} else if ( style == 5 ) {
 		return length( local ) - sz * 0.4;
 	} else if ( style == 7 ) {
 		return plotSdBox( local, vec2( sz * 0.08, w ) );
@@ -534,32 +556,46 @@ export const PLOT_SDF_EVALUATE = /* glsl */ `
 
 		} else if ( type == 3 ) {
 
-			int   vc  = int( plotReadF( off + 12 ) );
-			float hw  = plotReadF( off + 13 ) * pxDeg;
-			int   sa  = int( plotReadF( off + 14 ) );
-			int   ea  = int( plotReadF( off + 15 ) );
-			float asz = plotReadF( off + 16 ) * pxDeg;
-			float dashLen = plotReadF( off + 17 ) * pxDeg;
-			float gapLen  = plotReadF( off + 18 ) * pxDeg;
-			int   vs  = off + 19;
+			int   vc      = int( plotReadF( off + 12 ) );
+			int   sa      = int( plotReadF( off + 14 ) );
+			int   ea      = int( plotReadF( off + 15 ) );
+			float cosLat  = plotReadF( off + 18 );
+			int   vs      = off + 19;
+
+			vec2 toM = vec2( cosLat, 1.0 ) * 111320.0;
+			vec2 posM = pos * toM;
+
+			// Smooth screen-pixel -> meters estimate derived from the projection
+			// (same source as pxDeg used by other shapes). fwidth-based gradients
+			// flicker on triangle edges / tile seams and cause line aliasing.
+			float mpp = pxDeg * 111320.0;
+			float aaM = mpp * 1.5;
+
+			float hw      = plotReadF( off + 13 ) * mpp;
+			// Arrow size hardcoded: arrowSize = 3 * strokeWidth = 6 * hw.
+			float asz     = hw * 6.0;
+			// dashLen / gapLen are already in meters (intrinsic to the polyline).
+			float dashLen = plotReadF( off + 16 );
+			float gapLen  = plotReadF( off + 17 );
+
+			vec2 v0 = vec2( plotReadF( vs ),     plotReadF( vs + 1 ) ) * toM;
+			vec2 v1 = vec2( plotReadF( vs + 2 ), plotReadF( vs + 3 ) ) * toM;
+			vec2 vL = vec2( plotReadF( vs + ( vc - 1 ) * 2 ), plotReadF( vs + ( vc - 1 ) * 2 + 1 ) ) * toM;
+			vec2 vP = vec2( plotReadF( vs + ( vc - 2 ) * 2 ), plotReadF( vs + ( vc - 2 ) * 2 + 1 ) ) * toM;
+
 			float d   = 1e10;
 			float arcPos = 0.0;
 			float cumLen = 0.0;
 
-			vec2 v0 = vec2( plotReadF( vs ), plotReadF( vs + 1 ) );
-			vec2 v1 = vec2( plotReadF( vs + 2 ), plotReadF( vs + 3 ) );
-			vec2 vL = vec2( plotReadF( vs + ( vc - 1 ) * 2 ), plotReadF( vs + ( vc - 1 ) * 2 + 1 ) );
-			vec2 vP = vec2( plotReadF( vs + ( vc - 2 ) * 2 ), plotReadF( vs + ( vc - 2 ) * 2 + 1 ) );
-
 			for ( int i = 0; i < 63; i ++ ) {
 
 				if ( i >= vc - 1 ) break;
-				vec2 a = vec2( plotReadF( vs + i * 2 ), plotReadF( vs + i * 2 + 1 ) );
-				vec2 b = vec2( plotReadF( vs + ( i + 1 ) * 2 ), plotReadF( vs + ( i + 1 ) * 2 + 1 ) );
+				vec2 a = vec2( plotReadF( vs + i * 2 ),         plotReadF( vs + i * 2 + 1 ) )         * toM;
+				vec2 b = vec2( plotReadF( vs + ( i + 1 ) * 2 ), plotReadF( vs + ( i + 1 ) * 2 + 1 ) ) * toM;
 				vec2 ab = b - a;
 				float segLen = length( ab );
-				float t = clamp( dot( pos - a, ab ) / dot( ab, ab ), 0.0, 1.0 );
-				float segD = length( pos - a - ab * t );
+				float t = clamp( dot( posM - a, ab ) / dot( ab, ab ), 0.0, 1.0 );
+				float segD = length( posM - a - ab * t );
 
 				if ( segD < d ) {
 
@@ -578,20 +614,20 @@ export const PLOT_SDF_EVALUATE = /* glsl */ `
 
 				float cycle = dashLen + gapLen;
 				float phase = mod( arcPos, cycle );
-				if ( phase > dashLen ) d = max( d, aa );
+				if ( phase > dashLen ) d = max( d, aaM );
 
 			}
 
 			if ( sa > 0 ) {
 
-				float beyond = - dot( pos - v0, normalize( v1 - v0 ) );
+				float beyond = - dot( posM - v0, normalize( v1 - v0 ) );
 				if ( beyond > 0.0 ) d = max( d, beyond );
 
 			}
 
 			if ( ea > 0 ) {
 
-				float beyond = - dot( pos - vL, normalize( vP - vL ) );
+				float beyond = - dot( posM - vL, normalize( vP - vL ) );
 				if ( beyond > 0.0 ) d = max( d, beyond );
 
 			}
@@ -601,7 +637,7 @@ export const PLOT_SDF_EVALUATE = /* glsl */ `
 			if ( sa > 0 && asz > 0.0 ) {
 
 				vec2 dr = normalize( v0 - v1 );
-				vec2 lc = vec2( dot( pos - v0, dr ), dot( pos - v0, vec2( - dr.y, dr.x ) ) );
+				vec2 lc = vec2( dot( posM - v0, dr ), dot( posM - v0, vec2( - dr.y, dr.x ) ) );
 				arrowD = min( arrowD, plotArrowSdf( lc, sa, asz, hw ) );
 
 			}
@@ -609,7 +645,7 @@ export const PLOT_SDF_EVALUATE = /* glsl */ `
 			if ( ea > 0 && asz > 0.0 ) {
 
 				vec2 dr = normalize( vL - vP );
-				vec2 lc = vec2( dot( pos - vL, dr ), dot( pos - vL, vec2( - dr.y, dr.x ) ) );
+				vec2 lc = vec2( dot( posM - vL, dr ), dot( posM - vL, vec2( - dr.y, dr.x ) ) );
 				arrowD = min( arrowD, plotArrowSdf( lc, ea, asz, hw ) );
 
 			}
@@ -617,28 +653,28 @@ export const PLOT_SDF_EVALUATE = /* glsl */ `
 			bool arrowFilled = ( sa == 1 || sa == 3 || sa == 5 || ea == 1 || ea == 3 || ea == 5 );
 			float combined = min( d, arrowD );
 
-			if ( combined < aa ) {
+			if ( combined < aaM ) {
 
 				vec4 lc = sc.w > 0.001 ? sc : fc;
 
-				if ( arrowFilled && arrowD < d && arrowD < aa ) {
+				if ( arrowFilled && arrowD < d && arrowD < aaM ) {
 
-					plotApplyFill( plotResult, lc, arrowD, aa, op );
-					plotApplyStroke( plotResult, lc, arrowD, sw, aa, op );
+					plotApplyFill( plotResult, lc, arrowD, aaM, op );
+					plotApplyStroke( plotResult, lc, arrowD, sw, aaM, op );
 
 				} else {
 
-					float m = 1.0 - smoothstep( - aa, 0.0, combined );
+					float m = 1.0 - smoothstep( - aaM, 0.0, combined );
 					plotResult = mix( plotResult, vec4( lc.rgb, 1.0 ), max( lc.w, fc.w ) * op * m );
 
 				}
 
 			}
 
-			if ( arrowD < aa && ! arrowFilled ) {
+			if ( arrowD < aaM && ! arrowFilled ) {
 
 				vec4 lc = sc.w > 0.001 ? sc : fc;
-				plotApplyStroke( plotResult, lc, arrowD, sw * 0.5, aa, op );
+				plotApplyStroke( plotResult, lc, arrowD, sw * 0.5, aaM, op );
 
 			}
 
