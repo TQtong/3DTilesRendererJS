@@ -225,6 +225,7 @@ void main() {
 			float d   = 1e10;
 			float arcPos = 0.0;
 			float cumLen = 0.0;
+			int nearestSeg = - 1;
 
 			for ( int i = 0; i < 63; i ++ ) {
 
@@ -240,6 +241,7 @@ void main() {
 
 					d = segD;
 					arcPos = cumLen + t * segLen;
+					nearestSeg = i;
 
 				}
 
@@ -266,14 +268,14 @@ void main() {
 
 			}
 
-			if ( sa > 0 ) {
+			if ( sa > 0 && nearestSeg == 0 ) {
 
 				float beyond = - dot( posM - v0, normalize( v1 - v0 ) );
 				if ( beyond > 0.0 ) d = max( d, beyond );
 
 			}
 
-			if ( ea > 0 ) {
+			if ( ea > 0 && nearestSeg == vc - 2 ) {
 
 				float beyond = - dot( posM - vL, normalize( vP - vL ) );
 				if ( beyond > 0.0 ) d = max( d, beyond );
@@ -595,6 +597,7 @@ export const PLOT_SDF_EVALUATE = /* glsl */ `
 			float d   = 1e10;
 			float arcPos = 0.0;
 			float cumLen = 0.0;
+			int nearestSeg = - 1;
 
 			for ( int i = 0; i < 63; i ++ ) {
 
@@ -610,6 +613,7 @@ export const PLOT_SDF_EVALUATE = /* glsl */ `
 
 					d = segD;
 					arcPos = cumLen + t * segLen;
+					nearestSeg = i;
 
 				}
 
@@ -636,14 +640,14 @@ export const PLOT_SDF_EVALUATE = /* glsl */ `
 
 			}
 
-			if ( sa > 0 ) {
+			if ( sa > 0 && nearestSeg == 0 ) {
 
 				float beyond = - dot( posM - v0, normalize( v1 - v0 ) );
 				if ( beyond > 0.0 ) d = max( d, beyond );
 
 			}
 
-			if ( ea > 0 ) {
+			if ( ea > 0 && nearestSeg == vc - 2 ) {
 
 				float beyond = - dot( posM - vL, normalize( vP - vL ) );
 				if ( beyond > 0.0 ) d = max( d, beyond );

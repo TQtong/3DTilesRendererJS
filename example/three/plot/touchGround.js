@@ -28,6 +28,9 @@ const raycaster = new Raycaster();
 const mouse = new Vector2();
 const _hitPoint = new Vector3();
 
+/** 折线绘制模式下的顶点（经纬度，度），与 decals 中线图形同步 */
+let lineDrawVertices = [];
+
 const shapeIds = {
 	pointId: null,
 	lineId: null,
@@ -66,6 +69,8 @@ const S = {
 	lineStartArrow: 'none',
 	lineEndArrow: 'filledArrow',
 	lineVisible: true,
+	/** 开启后在地面点击追加折线顶点；关闭后可旋转/平移场景 */
+	lineDrawMode: false,
 
 	polyFillColor: '#3B82F6',
 	polyFillOpacity: 40,
@@ -316,6 +321,108 @@ function applyArrow() {
 
 }
 
+// ────────────────────── 折线鼠标绘制 ──────────────────────
+
+/**
+ * @returns {{ lon: number, lat: number } | null} 经纬度（度）
+ */
+function pickLonLatDegrees( clientX, clientY ) {
+
+	if ( ! tiles ) return null;
+
+	const rect = renderer.domElement.getBoundingClientRect();
+	mouse.x = ( ( clientX - rect.left ) / rect.width ) * 2 - 1;
+	mouse.y = - ( ( clientY - rect.top ) / rect.height ) * 2 + 1;
+
+	raycaster.setFromCamera( mouse, camera );
+	raycaster.firstHitOnly = true;
+
+	const hits = raycaster.intersectObject( tiles.group, true );
+	if ( hits.length === 0 ) return null;
+
+	_hitPoint.copy( hits[ 0 ].point )
+		.applyMatrix4( tiles.group.matrixWorld.clone().invert() );
+
+	const cart = {};
+	tiles.ellipsoid.getPositionToCartographic( _hitPoint, cart );
+
+	return {
+		lon: cart.lon * MathUtils.RAD2DEG,
+		lat: cart.lat * MathUtils.RAD2DEG,
+	};
+
+}
+
+function lineVerticesToDecalCoords( verts ) {
+
+	if ( verts.length === 0 ) return [[ 0, 0 ], [ 0, 0 ]];
+	if ( verts.length === 1 ) return [ verts[ 0 ], verts[ 0 ] ];
+	return verts.map( p => [ p[ 0 ], p[ 1 ] ] );
+
+}
+
+function ensureLineShape() {
+
+	if ( shapeIds.lineId != null ) return;
+	shapeIds.lineId = decals.addLine( {
+		points: [[ 0, 0 ], [ 0, 0 ]],
+		strokeStyle: S.lineStrokeStyle,
+		strokeColor: S.lineStrokeColor, strokeWidth: S.lineStrokeWidth, strokeOpacity: S.lineStrokeOpacity,
+		startArrowStyle: S.lineStartArrow === 'none' ? null : S.lineStartArrow,
+		endArrowStyle: S.lineEndArrow === 'none' ? null : S.lineEndArrow,
+		visible: false,
+	} );
+
+}
+
+function syncLineDrawFromDecal() {
+
+	lineDrawVertices = [];
+	if ( shapeIds.lineId == null ) return;
+
+	const snap = decals.getItem( shapeIds.lineId );
+	const pts = snap?.options?.points;
+	if ( ! pts || pts.length === 0 ) return;
+
+	lineDrawVertices = pts.map( p => [ p[ 0 ], p[ 1 ] ] );
+	if ( lineDrawVertices.length === 2 &&
+		lineDrawVertices[ 0 ][ 0 ] === lineDrawVertices[ 1 ][ 0 ] &&
+		lineDrawVertices[ 0 ][ 1 ] === lineDrawVertices[ 1 ][ 1 ] ) {
+
+		lineDrawVertices.pop();
+
+	}
+
+}
+
+function pushLineDrawVertex( lon, lat ) {
+
+	ensureLineShape();
+	lineDrawVertices.push( [ lon, lat ] );
+	const coords = lineVerticesToDecalCoords( lineDrawVertices );
+	decals.setCoords( shapeIds.lineId, coords );
+	decals.setStyle( shapeIds.lineId, { visible: S.lineVisible } );
+	applyLine();
+
+}
+
+function clearLineDrawVertices() {
+
+	lineDrawVertices = [];
+	if ( shapeIds.lineId == null ) return;
+	decals.setCoords( shapeIds.lineId, [[ 0, 0 ], [ 0, 0 ]] );
+	decals.setStyle( shapeIds.lineId, { visible: false } );
+
+}
+
+function setLineDrawMode( enabled ) {
+
+	controls.enabled = ! enabled;
+	renderer.domElement.style.cursor = enabled ? 'crosshair' : '';
+	if ( enabled ) syncLineDrawFromDecal();
+
+}
+
 // ────────────────────── GUI helpers ──────────────────────
 
 function addFillControls( folder, prefix, apply ) {
@@ -356,7 +463,7 @@ function addDemoPoint() {
 function addDemoLine() {
 
 	return decals.addLine( {
-		points: [[ 100.50, 22.85 ], [ 100.60, 22.90 ], [ 100.70, 22.87 ], [ 100.80, 22.92 ], [ 100.90, 22.88 ]],
+		points: [[ 100.55, 22.6 ], [ 100.62, 22.56 ], [ 100.7, 22.6 ], [ 100.75, 22.65 ], [ 100.68, 22.7 ], [ 100.6, 22.66 ]],
 		strokeStyle: S.lineStrokeStyle,
 		strokeColor: S.lineStrokeColor, strokeWidth: S.lineStrokeWidth, strokeOpacity: S.lineStrokeOpacity,
 		startArrowStyle: null, endArrowStyle: 'filledArrow',
@@ -533,6 +640,23 @@ function init() {
 	lnF.add( S, 'lineEndArrow', arrowOpts ).name( 'End Arrow' ).onChange( applyLine );
 	addVisibleToggle( lnF, 'line', applyLine );
 
+	const lineDrawController = lnF.add( S, 'lineDrawMode' ).name( 'Draw polyline (click)' ).onChange( setLineDrawMode );
+	lnF.add( { clearLineVertices: () => {
+
+		clearLineDrawVertices();
+
+	} }, 'clearLineVertices' ).name( 'Clear polyline' );
+
+	const resetLineDrawUi = () => {
+
+		if ( ! S.lineDrawMode ) return;
+		S.lineDrawMode = false;
+		setLineDrawMode( false );
+		lineDrawController.updateDisplay();
+		lineDrawVertices = [];
+
+	};
+
 	const pgF = gui.addFolder( 'Polygon' );
 	addFillControls( pgF, 'poly', applyPoly );
 	addStrokeControls( pgF, 'poly', applyPoly );
@@ -598,6 +722,7 @@ function init() {
 			decals.remove( id );
 			shapeIds[ entry.idKey ] = null;
 			entry.folders.forEach( f => f.hide() );
+			if ( entry.idKey === 'lineId' ) resetLineDrawUi();
 
 		};
 
@@ -616,6 +741,7 @@ function init() {
 
 	deleteFolder.add( { clearAll: () => {
 
+		resetLineDrawUi();
 		decals.clear();
 		for ( const key in shapeIds ) shapeIds[ key ] = null;
 		shapeEntries.forEach( e => e.folders.forEach( f => f.hide() ) );
@@ -636,6 +762,13 @@ function init() {
 		}
 
 	} }, 'reAddAll' ).name( 'Re-add All' );
+
+	window.addEventListener( 'keydown', e => {
+
+		if ( e.key !== 'Escape' ) return;
+		resetLineDrawUi();
+
+	} );
 
 }
 
@@ -677,25 +810,18 @@ function setupCoordPicker() {
 
 		if ( ! tiles ) return;
 
-		const rect = renderer.domElement.getBoundingClientRect();
-		mouse.x = ( ( e.clientX - rect.left ) / rect.width ) * 2 - 1;
-		mouse.y = - ( ( e.clientY - rect.top ) / rect.height ) * 2 + 1;
+		const picked = pickLonLatDegrees( e.clientX, e.clientY );
+		if ( picked == null ) return;
 
-		raycaster.setFromCamera( mouse, camera );
-		raycaster.firstHitOnly = true;
+		if ( S.lineDrawMode ) {
 
-		const hits = raycaster.intersectObject( tiles.group, true );
-		if ( hits.length === 0 ) return;
+			pushLineDrawVertex( picked.lon, picked.lat );
+			return;
 
-		// 射线交点在世界坐标系中，需要逆变换回 ECEF 坐标系
-		_hitPoint.copy( hits[ 0 ].point )
-			.applyMatrix4( tiles.group.matrixWorld.clone().invert() );
+		}
 
-		const cart = {};
-		tiles.ellipsoid.getPositionToCartographic( _hitPoint, cart );
-
-		const lat = ( cart.lat * MathUtils.RAD2DEG ).toFixed( 6 );
-		const lon = ( cart.lon * MathUtils.RAD2DEG ).toFixed( 6 );
+		const lat = picked.lat.toFixed( 6 );
+		const lon = picked.lon.toFixed( 6 );
 
 		tooltip.textContent = `Lat: ${ lat }°  Lon: ${ lon }°`;
 		tooltip.style.left = ( e.clientX + 14 ) + 'px';
