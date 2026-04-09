@@ -68,6 +68,7 @@ const _clearColor = new Color();
 
 const DEG2RAD = MathUtils.DEG2RAD;
 const RAD2DEG = MathUtils.RAD2DEG;
+const MAX_LINE_POINTS = 64;
 
 /** 标签图集边长（像素）。所有文字打在同一张 atlas 上，避免每字一张纹理。 */
 const LABEL_ATLAS_SIZE = 2048;
@@ -405,39 +406,7 @@ export class PlotImageSource extends RegionImageSource {
 
 			} else if ( cat === 'line' ) {
 
-				const vc = pts.length;
-				if ( vc < 2 ) continue;
-				const sw = opts.strokeWidth || 3;
-				// Line per-pixel sizes are stored as raw pixels and converted to meters in shader.
-				const hwPx = sw / 2;
-				const sa = _arrowInt( opts.startArrowStyle );
-				const ea = _arrowInt( opts.endArrowStyle );
-				// Arrow size is hardcoded in shader as 2x strokeWidth.
-
-				let sumLat = 0;
-				for ( const c of pts ) sumLat += c[ 1 ];
-				const cosMidLat = Math.cos( ( sumLat / vc ) * DEG2RAD );
-
-				// Real-world stroke pattern. Encoding:
-				//   gapLen > 0: dashed (rect strips). dashLen=on meters, gapLen=off meters.
-				//   gapLen < 0: dotted (round dots).  |gapLen|=center-to-center spacing in meters.
-				let dashLen_m = 0, gapLen_m = 0;
-				if ( opts.strokeStyle === 'dashed' ) {
-					dashLen_m = 10;
-					gapLen_m  = 10;
-				} else if ( opts.strokeStyle === 'dotted' ) {
-					dashLen_m = 0;
-					gapLen_m  = - 5;
-				}
-
-				const total = 19 + vc * 2;
-
-				const lineColor = _parseColor( opts.strokeColor || opts.fillColor || '#ffffff' );
-				lineColor[ 3 ] *= strokeOp;
-
-				arr.push( 3, total, lineColor[ 0 ], lineColor[ 1 ], lineColor[ 2 ], lineColor[ 3 ], 0, 0, 0, 0, 0, op, vc, hwPx, sa, ea, dashLen_m, gapLen_m, cosMidLat );
-				for ( const c of pts ) arr.push( c[ 0 ], c[ 1 ] );
-				shapeCount ++;
+				shapeCount += _appendLineShapeData( arr, pts, opts, strokeOp, op );
 
 			} else if ( cat === 'polygon' ) {
 
@@ -737,6 +706,92 @@ function _arrowInt( style ) {
 	if ( ! style ) return 0;
 	// Supported styles only. Shader branches: 1=triangle, 3=diamond, 5=circle, 7=bar.
 	return { 'filledArrow': 1, 'filledDiamond': 3, 'filledCircle': 5, 'bar': 7 }[ style ] || 0;
+
+}
+
+function _appendLineShapeData( arr, pts, opts, strokeOp, op ) {
+
+	const vc = pts.length;
+	if ( vc < 2 ) return 0;
+
+	const sw = opts.strokeWidth || 3;
+	const hwPx = sw / 2;
+	const sa = _arrowInt( opts.startArrowStyle );
+	const ea = _arrowInt( opts.endArrowStyle );
+
+	let sumLat = 0;
+	for ( const c of pts ) sumLat += c[ 1 ];
+	const cosMidLat = Math.cos( ( sumLat / vc ) * DEG2RAD );
+
+	let dashLen_m = 0, gapLen_m = 0;
+	if ( opts.strokeStyle === 'dashed' ) {
+
+		dashLen_m = 10;
+		gapLen_m = 10;
+
+	} else if ( opts.strokeStyle === 'dotted' ) {
+
+		dashLen_m = 0;
+		gapLen_m = - 5;
+
+	}
+
+	const lineColor = _parseColor( opts.strokeColor || opts.fillColor || '#ffffff' );
+	lineColor[ 3 ] *= strokeOp;
+
+	const meterScaleX = cosMidLat * 111320;
+	const meterScaleY = 111320;
+	const segmentLengths = new Array( vc - 1 );
+	for ( let i = 0; i < vc - 1; i ++ ) {
+
+		const a = pts[ i ];
+		const b = pts[ i + 1 ];
+		segmentLengths[ i ] = Math.hypot(
+			( b[ 0 ] - a[ 0 ] ) * meterScaleX,
+			( b[ 1 ] - a[ 1 ] ) * meterScaleY,
+		);
+
+	}
+
+	let shapeCount = 0;
+	let chunkStart = 0;
+	let arcOffset = 0;
+	while ( chunkStart < vc - 1 ) {
+
+		const chunkVc = Math.min( MAX_LINE_POINTS, vc - chunkStart );
+		const chunkEnd = chunkStart + chunkVc;
+		const chunkSa = chunkStart === 0 ? sa : 0;
+		const chunkEa = chunkEnd === vc ? ea : 0;
+		const total = 20 + chunkVc * 2;
+
+		arr.push(
+			3, total,
+			lineColor[ 0 ], lineColor[ 1 ], lineColor[ 2 ], lineColor[ 3 ],
+			0, 0, 0, 0,
+			0, op,
+			chunkVc, hwPx, chunkSa, chunkEa, dashLen_m, gapLen_m, cosMidLat, arcOffset,
+		);
+		for ( let i = chunkStart; i < chunkEnd; i ++ ) {
+
+			const c = pts[ i ];
+			arr.push( c[ 0 ], c[ 1 ] );
+
+		}
+
+		shapeCount ++;
+		if ( chunkEnd >= vc ) break;
+
+		for ( let i = chunkStart; i < chunkEnd - 1; i ++ ) {
+
+			arcOffset += segmentLengths[ i ];
+
+		}
+
+		chunkStart = chunkEnd - 1;
+
+	}
+
+	return shapeCount;
 
 }
 

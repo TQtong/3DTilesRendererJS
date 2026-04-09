@@ -128,7 +128,7 @@ void main() {
 	int off = 1;
 	vec4 result = vec4( 0.0 );
 
-	for ( int s = 0; s < 64; s ++ ) {
+	for ( int s = 0; s < 256; s ++ ) {
 
 		if ( s >= count ) break;
 
@@ -199,7 +199,8 @@ void main() {
 			int   sa      = int( readF( off + 14 ) );
 			int   ea      = int( readF( off + 15 ) );
 			float cosLat  = readF( off + 18 );
-			int   vs      = off + 19;
+			float arcBase = readF( off + 19 );
+			int   vs      = off + 20;
 
 			// Stored sizes are in pixels; convert to meters via tile texel size.
 			float tileCos = cos( ( uTileBounds.y + uTileBounds.w ) * 0.5 * 0.017453293 );
@@ -240,7 +241,7 @@ void main() {
 				if ( segD < d ) {
 
 					d = segD;
-					arcPos = cumLen + t * segLen;
+					arcPos = arcBase + cumLen + t * segLen;
 					nearestSeg = i;
 
 				}
@@ -504,7 +505,7 @@ export const PLOT_SDF_EVALUATE = /* glsl */ `
 	int off = 1;
 	vec4 plotResult = vec4( 0.0 );
 
-	for ( int s = 0; s < 64; s ++ ) {
+	for ( int s = 0; s < 256; s ++ ) {
 
 		if ( s >= count ) break;
 
@@ -571,7 +572,8 @@ export const PLOT_SDF_EVALUATE = /* glsl */ `
 			int   sa      = int( plotReadF( off + 14 ) );
 			int   ea      = int( plotReadF( off + 15 ) );
 			float cosLat  = plotReadF( off + 18 );
-			int   vs      = off + 19;
+			float arcBase = plotReadF( off + 19 );
+			int   vs      = off + 20;
 
 			vec2 toM = vec2( cosLat, 1.0 ) * 111320.0;
 			vec2 posM = pos * toM;
@@ -612,7 +614,7 @@ export const PLOT_SDF_EVALUATE = /* glsl */ `
 				if ( segD < d ) {
 
 					d = segD;
-					arcPos = cumLen + t * segLen;
+					arcPos = arcBase + cumLen + t * segLen;
 					nearestSeg = i;
 
 				}

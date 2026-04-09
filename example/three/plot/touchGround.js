@@ -28,7 +28,11 @@ const raycaster = new Raycaster();
 const mouse = new Vector2();
 const _hitPoint = new Vector3();
 
-/** 折线绘制模式下的顶点（经纬度，度），与 decals 中线图形同步 */
+/** 鼠标绘制新增的折线 id（不含 Demo 的 shapeIds.lineId） */
+const userDrawnLineIds = [];
+/** 当前笔划对应的折线 id，null 表示下次点击会 addLine 新建一条 */
+let lineDrawActiveId = null;
+/** 当前笔划顶点（经纬度，度） */
 let lineDrawVertices = [];
 
 const shapeIds = {
@@ -215,10 +219,9 @@ function applyPoint() {
 
 }
 
-function applyLine() {
+function getLineStyleOptions() {
 
-	if ( shapeIds.lineId == null ) return;
-	decals.setStyle( shapeIds.lineId, {
+	return {
 		strokeStyle: S.lineStrokeStyle,
 		strokeColor: S.lineStrokeColor,
 		strokeWidth: S.lineStrokeWidth,
@@ -226,7 +229,15 @@ function applyLine() {
 		startArrowStyle: S.lineStartArrow === 'none' ? null : S.lineStartArrow,
 		endArrowStyle: S.lineEndArrow === 'none' ? null : S.lineEndArrow,
 		visible: S.lineVisible,
-	} );
+	};
+
+}
+
+function applyLine() {
+
+	const patch = getLineStyleOptions();
+	if ( shapeIds.lineId != null ) decals.setStyle( shapeIds.lineId, patch );
+	for ( const id of userDrawnLineIds ) decals.setStyle( id, patch );
 
 }
 
@@ -361,57 +372,35 @@ function lineVerticesToDecalCoords( verts ) {
 
 }
 
-function ensureLineShape() {
+function pushLineDrawVertex( lon, lat ) {
 
-	if ( shapeIds.lineId != null ) return;
-	shapeIds.lineId = decals.addLine( {
-		points: [[ 0, 0 ], [ 0, 0 ]],
-		strokeStyle: S.lineStrokeStyle,
-		strokeColor: S.lineStrokeColor, strokeWidth: S.lineStrokeWidth, strokeOpacity: S.lineStrokeOpacity,
-		startArrowStyle: S.lineStartArrow === 'none' ? null : S.lineStartArrow,
-		endArrowStyle: S.lineEndArrow === 'none' ? null : S.lineEndArrow,
-		visible: false,
-	} );
+	lineDrawVertices.push( [ lon, lat ] );
+	const coords = lineVerticesToDecalCoords( lineDrawVertices );
+	const styleOpts = getLineStyleOptions();
 
-}
+	if ( lineDrawActiveId == null ) {
 
-function syncLineDrawFromDecal() {
+		lineDrawActiveId = decals.addLine( {
+			points: coords,
+			...styleOpts,
+		} );
+		userDrawnLineIds.push( lineDrawActiveId );
 
-	lineDrawVertices = [];
-	if ( shapeIds.lineId == null ) return;
+	} else {
 
-	const snap = decals.getItem( shapeIds.lineId );
-	const pts = snap?.options?.points;
-	if ( ! pts || pts.length === 0 ) return;
-
-	lineDrawVertices = pts.map( p => [ p[ 0 ], p[ 1 ] ] );
-	if ( lineDrawVertices.length === 2 &&
-		lineDrawVertices[ 0 ][ 0 ] === lineDrawVertices[ 1 ][ 0 ] &&
-		lineDrawVertices[ 0 ][ 1 ] === lineDrawVertices[ 1 ][ 1 ] ) {
-
-		lineDrawVertices.pop();
+		decals.setCoords( lineDrawActiveId, coords );
+		decals.setStyle( lineDrawActiveId, styleOpts );
 
 	}
 
 }
 
-function pushLineDrawVertex( lon, lat ) {
+function clearUserDrawnPolylines() {
 
-	ensureLineShape();
-	lineDrawVertices.push( [ lon, lat ] );
-	const coords = lineVerticesToDecalCoords( lineDrawVertices );
-	decals.setCoords( shapeIds.lineId, coords );
-	decals.setStyle( shapeIds.lineId, { visible: S.lineVisible } );
-	applyLine();
-
-}
-
-function clearLineDrawVertices() {
-
+	for ( const id of userDrawnLineIds ) decals.remove( id );
+	userDrawnLineIds.length = 0;
+	lineDrawActiveId = null;
 	lineDrawVertices = [];
-	if ( shapeIds.lineId == null ) return;
-	decals.setCoords( shapeIds.lineId, [[ 0, 0 ], [ 0, 0 ]] );
-	decals.setStyle( shapeIds.lineId, { visible: false } );
 
 }
 
@@ -419,7 +408,8 @@ function setLineDrawMode( enabled ) {
 
 	controls.enabled = ! enabled;
 	renderer.domElement.style.cursor = enabled ? 'crosshair' : '';
-	if ( enabled ) syncLineDrawFromDecal();
+	lineDrawActiveId = null;
+	lineDrawVertices = [];
 
 }
 
@@ -463,7 +453,40 @@ function addDemoPoint() {
 function addDemoLine() {
 
 	return decals.addLine( {
-		points: [[ 100.55, 22.6 ], [ 100.62, 22.56 ], [ 100.7, 22.6 ], [ 100.75, 22.65 ], [ 100.68, 22.7 ], [ 100.6, 22.66 ]],
+		points: [
+			[
+				119.99552468061438,
+				29.98779678449977
+			],
+			[
+				119.99580048686205,
+				29.988238416209864
+			],
+			[
+				119.99534018250115,
+				29.988492694365185
+			],
+			[
+				119.99435743163077,
+				29.988454606644222
+			],
+			[
+				119.99414870282934,
+				29.988084796650025
+			],
+			[
+				119.9944385073686,
+				29.987605192923038
+			],
+			[
+				119.99489756955799,
+				29.98744160470172
+			],
+			[
+				119.99515575549049,
+				29.98734323911049
+			]
+		],
 		strokeStyle: S.lineStrokeStyle,
 		strokeColor: S.lineStrokeColor, strokeWidth: S.lineStrokeWidth, strokeOpacity: S.lineStrokeOpacity,
 		startArrowStyle: null, endArrowStyle: 'filledArrow',
@@ -641,11 +664,18 @@ function init() {
 	addVisibleToggle( lnF, 'line', applyLine );
 
 	const lineDrawController = lnF.add( S, 'lineDrawMode' ).name( 'Draw polyline (click)' ).onChange( setLineDrawMode );
-	lnF.add( { clearLineVertices: () => {
+	lnF.add( { nextPolyline: () => {
 
-		clearLineDrawVertices();
+		if ( ! S.lineDrawMode ) return;
+		lineDrawActiveId = null;
+		lineDrawVertices = [];
 
-	} }, 'clearLineVertices' ).name( 'Clear polyline' );
+	} }, 'nextPolyline' ).name( 'Next polyline' );
+	lnF.add( { clearDrawnPolylines: () => {
+
+		clearUserDrawnPolylines();
+
+	} }, 'clearDrawnPolylines' ).name( 'Clear drawn polylines' );
 
 	const resetLineDrawUi = () => {
 
@@ -653,6 +683,7 @@ function init() {
 		S.lineDrawMode = false;
 		setLineDrawMode( false );
 		lineDrawController.updateDisplay();
+		lineDrawActiveId = null;
 		lineDrawVertices = [];
 
 	};
@@ -742,6 +773,7 @@ function init() {
 	deleteFolder.add( { clearAll: () => {
 
 		resetLineDrawUi();
+		userDrawnLineIds.length = 0;
 		decals.clear();
 		for ( const key in shapeIds ) shapeIds[ key ] = null;
 		shapeEntries.forEach( e => e.folders.forEach( f => f.hide() ) );
