@@ -30,8 +30,8 @@ import {
 
 import { PLOT_SDF_FUNCTIONS, PLOT_SDF_EVALUATE } from './images/sources/plot/TileSdfShader.js';
 import { buildShapeData, boundsIntersect } from './images/sources/plot/buildShapeData.js';
+import { buildTextAtlas, getPlotShapeBounds } from './images/sources/plot/TextBoxLayout.js';
 
-const DEG2RAD = MathUtils.DEG2RAD;
 const RAD2DEG = MathUtils.RAD2DEG;
 
 const _vec = /* @__PURE__ */ new Vector3();
@@ -39,8 +39,8 @@ const _cart = {};
 
 const PLOT_UNIFORMS = Symbol( 'PLOT_SDF_UNIFORMS' );
 const LABEL_ATLAS_SIZE = 4096;
-const LABEL_M_PER_PX = 3;
 const LABEL_RENDER_SCALE = 4;
+const LABEL_M_PER_PX = 3;
 
 export class PlotSdfPlugin {
 
@@ -346,7 +346,7 @@ export class PlotSdfPlugin {
 
 		const tex = buildShapeData( this.shapes, bounds, {
 			screenSpace: true,
-			getShapeBounds: ( shape ) => this._getShapeBounds( shape ),
+			getShapeBounds: ( shape ) => getPlotShapeBounds( shape, this._labelTiles ),
 			labelTiles: this._labelTiles,
 			refLonLat: info.refLonLat,
 		} );
@@ -389,6 +389,12 @@ export class PlotSdfPlugin {
 
 	_updateBounds() {
 
+		this._labelTiles = buildTextAtlas( this._labelCanvas, this.shapes, {
+			atlasSize: LABEL_ATLAS_SIZE,
+			metersPerPixel: LABEL_M_PER_PX,
+			renderScale: LABEL_RENDER_SCALE,
+		} );
+
 		let minLon = Infinity, minLat = Infinity;
 		let maxLon = - Infinity, maxLat = - Infinity;
 		let hasAny = false;
@@ -396,7 +402,7 @@ export class PlotSdfPlugin {
 		for ( const shape of this.shapes.values() ) {
 
 			if ( shape.options.visible === false ) continue;
-			const bounds = this._getShapeBounds( shape );
+			const bounds = getPlotShapeBounds( shape, this._labelTiles );
 			if ( ! bounds ) continue;
 
 			minLon = Math.min( minLon, bounds[ 0 ] );
@@ -408,176 +414,6 @@ export class PlotSdfPlugin {
 		}
 
 		this.contentBounds = hasAny ? [ minLon, minLat, maxLon, maxLat ] : null;
-
-		this._buildLabelAtlas();
-
-	}
-
-	_getShapeBounds( shape ) {
-
-		const pts = shape.options.points;
-		if ( ! pts || pts.length === 0 ) return null;
-
-		let minLon = Infinity, minLat = Infinity;
-		let maxLon = - Infinity, maxLat = - Infinity;
-
-		for ( const [ lon, lat ] of pts ) {
-
-			minLon = Math.min( minLon, lon );
-			maxLon = Math.max( maxLon, lon );
-			minLat = Math.min( minLat, lat );
-			maxLat = Math.max( maxLat, lat );
-
-		}
-
-		const cat = shape.category;
-		if ( cat === 'circle' || cat === 'sector' ) {
-
-			const r = shape.options.radius || 0;
-			const dLon = r / ( 111320 * Math.cos( pts[ 0 ][ 1 ] * DEG2RAD ) );
-			const dLat = r / 111320;
-			minLon -= dLon; maxLon += dLon;
-			minLat -= dLat; maxLat += dLat;
-
-		} else if ( cat === 'point' ) {
-
-			const sz = ( shape.options.size || 0 ) / 2;
-			const dLon = sz / ( 111320 * Math.cos( pts[ 0 ][ 1 ] * DEG2RAD ) );
-			const dLat = sz / 111320;
-			minLon -= dLon; maxLon += dLon;
-			minLat -= dLat; maxLat += dLat;
-
-		} else if ( cat === 'text' ) {
-
-			const fontSize = shape.options.fontSize || 48;
-			const content = shape.options.content || '';
-			const textH = ( fontSize * 1.4 + 20 ) * LABEL_M_PER_PX;
-			const textW = textH * content.length * 0.7;
-			const dLon = textW / ( 111320 * Math.cos( pts[ 0 ][ 1 ] * DEG2RAD ) );
-			const dLat = textH / 111320;
-			minLon -= dLon; maxLon += dLon;
-			minLat -= dLat; maxLat += dLat;
-
-		}
-
-		const sw = shape.options.strokeWidth || 0;
-		if ( sw > 0 ) {
-
-			const pad = sw * 0.001;
-			minLon -= pad; maxLon += pad;
-			minLat -= pad; maxLat += pad;
-
-		}
-
-		return [ minLon, minLat, maxLon, maxLat ];
-
-	}
-
-	_buildLabelAtlas() {
-
-		if ( ! this._labelCanvas ) return;
-
-		this._labelTiles.clear();
-		const ctx = this._labelCanvas.getContext( '2d' );
-		ctx.clearRect( 0, 0, LABEL_ATLAS_SIZE, LABEL_ATLAS_SIZE );
-
-		let cursorX = 0, cursorY = 0, rowH = 0;
-
-		for ( const [ id, shape ] of this.shapes ) {
-
-			if ( shape.category !== 'text' ) continue;
-			const opts = shape.options;
-
-			const fontSize = opts.fontSize || 48;
-			let S = LABEL_RENDER_SCALE;
-			let renderSize = fontSize * S;
-			let strokeW = ( opts.strokeWidth || 4 ) * S;
-			let pad = strokeW + 6 * S;
-
-			ctx.font = renderSize + 'px sans-serif';
-			let metrics = ctx.measureText( opts.content || '' );
-			let tw = Math.ceil( metrics.width + pad * 2 );
-			let th = Math.ceil( renderSize * 1.4 + pad * 2 );
-
-			// Per-shape clamp: if either dimension exceeds the atlas, scale S down so it fits.
-			if ( tw > LABEL_ATLAS_SIZE || th > LABEL_ATLAS_SIZE ) {
-
-				const ratio = Math.min( ( LABEL_ATLAS_SIZE - 1 ) / tw, ( LABEL_ATLAS_SIZE - 1 ) / th );
-				S = Math.max( 0.1, S * ratio );
-				renderSize = fontSize * S;
-				strokeW = ( opts.strokeWidth || 4 ) * S;
-				pad = strokeW + 6 * S;
-				ctx.font = renderSize + 'px sans-serif';
-				metrics = ctx.measureText( opts.content || '' );
-				tw = Math.ceil( metrics.width + pad * 2 );
-				th = Math.ceil( renderSize * 1.4 + pad * 2 );
-
-			}
-
-			const font = renderSize + 'px sans-serif';
-			const mPerCanvasPx = LABEL_M_PER_PX / S;
-
-			if ( cursorX + tw > LABEL_ATLAS_SIZE ) {
-
-				cursorX = 0;
-				cursorY += rowH;
-				rowH = 0;
-
-			}
-
-			if ( cursorY + th > LABEL_ATLAS_SIZE ) break;
-
-			const tx = cursorX, ty = cursorY;
-			const cy = ty + th / 2;
-			const align = opts.textAlign || 'center';
-
-			// Anchor x must match textAlign so the text stays inside the tile rect.
-			let ax;
-			if ( align === 'left' ) ax = tx + pad;
-			else if ( align === 'right' ) ax = tx + tw - pad;
-			else ax = tx + tw / 2;
-
-			ctx.font = font;
-			ctx.textAlign = align;
-			ctx.textBaseline = 'middle';
-
-			if ( opts.fillColor ) {
-
-				ctx.globalAlpha = opts.fillOpacity !== undefined ? opts.fillOpacity / 100 : 1;
-				ctx.fillStyle = opts.fillColor;
-				ctx.fillRect( tx, ty, tw, th );
-
-			}
-
-			ctx.globalAlpha = 1;
-
-			if ( opts.strokeColor && ( opts.strokeWidth || 0 ) > 0 ) {
-
-				ctx.strokeStyle = opts.strokeColor;
-				ctx.lineWidth = strokeW;
-				ctx.strokeText( opts.content || '', ax, cy );
-
-			}
-
-			ctx.fillStyle = opts.fontColor || '#ffffff';
-			ctx.fillText( opts.content || '', ax, cy );
-
-			const cLat = ( opts.points && opts.points[ 0 ] ) ? opts.points[ 0 ][ 1 ] : 0;
-			const metersPerDegLon = 111320 * Math.cos( cLat * DEG2RAD );
-			const metersPerDegLat = 111320;
-
-			this._labelTiles.set( id, {
-				halfWDeg: tw * mPerCanvasPx / metersPerDegLon / 2,
-				halfHDeg: th * mPerCanvasPx / metersPerDegLat / 2,
-				u0: tx / LABEL_ATLAS_SIZE, v0: ty / LABEL_ATLAS_SIZE,
-				u1: ( tx + tw ) / LABEL_ATLAS_SIZE, v1: ( ty + th ) / LABEL_ATLAS_SIZE,
-			} );
-
-			cursorX += tw;
-			if ( th > rowH ) rowH = th;
-
-		}
-
 		if ( this._labelAtlasTex ) this._labelAtlasTex.needsUpdate = true;
 
 	}

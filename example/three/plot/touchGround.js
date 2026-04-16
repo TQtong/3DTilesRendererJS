@@ -122,7 +122,17 @@ const S = {
 	textFillOpacity: 60,
 	textStrokeColor: '#000000',
 	textStrokeWidth: 5,
+	textPadding: 12,
+	textBoxWidth: 240,
+	textBoxHeight: 0,
+	textLayoutDirection: 'horizontal',
 	textAlign: 'center',
+	textVerticalAlign: 'middle',
+	textAnchorX: 'center',
+	textAnchorY: 'middle',
+	textRotation: 0,
+	textOffsetX: 0,
+	textOffsetY: 0,
 	textVisible: true,
 };
 
@@ -303,7 +313,13 @@ function applyCircle() {
 function applyText() {
 
 	if ( shapeIds.textId == null ) return;
-	decals.setStyle( shapeIds.textId, {
+	decals.setStyle( shapeIds.textId, getTextStyleOptions() );
+
+}
+
+function getTextStyleOptions() {
+
+	return {
 		content: S.textContent,
 		fontColor: S.textFontColor,
 		fontSize: S.textFontSize,
@@ -311,9 +327,19 @@ function applyText() {
 		fillOpacity: S.textFillOpacity,
 		strokeColor: S.textStrokeColor,
 		strokeWidth: S.textStrokeWidth,
+		padding: S.textPadding,
+		boxWidth: S.textBoxWidth > 0 ? S.textBoxWidth : undefined,
+		boxHeight: S.textBoxHeight > 0 ? S.textBoxHeight : undefined,
+		layoutDirection: S.textLayoutDirection,
 		textAlign: S.textAlign,
+		verticalAlign: S.textVerticalAlign,
+		anchorX: S.textAnchorX,
+		anchorY: S.textAnchorY,
+		rotation: S.textRotation,
+		offsetX: S.textOffsetX,
+		offsetY: S.textOffsetY,
 		visible: S.textVisible,
-	} );
+	};
 
 }
 
@@ -436,6 +462,43 @@ function addVisibleToggle( folder, prefix, apply ) {
 
 }
 
+function addTextareaControl( folder, object, property, label, apply, rows = 4 ) {
+
+	const controller = folder.add( object, property ).name( label );
+	const input = controller.domElement.querySelector( 'input' );
+	if ( ! input ) return controller;
+
+	const widget = input.parentElement;
+	const textarea = document.createElement( 'textarea' );
+	textarea.value = object[ property ] ?? '';
+	textarea.rows = rows;
+	textarea.spellcheck = false;
+	textarea.wrap = 'soft';
+	textarea.style.width = '100%';
+	textarea.style.minHeight = `${ rows * 1.8 }em`;
+	textarea.style.resize = 'vertical';
+	textarea.style.boxSizing = 'border-box';
+
+	widget.replaceChildren( textarea );
+
+	controller.updateDisplay = () => {
+
+		textarea.value = object[ property ] ?? '';
+		return controller;
+
+	};
+
+	textarea.addEventListener( 'input', () => {
+
+		object[ property ] = textarea.value;
+		apply();
+
+	} );
+
+	return controller;
+
+}
+
 // ────────────────────── shape factory helpers ──────────────────────
 
 function addDemoPoint() {
@@ -551,11 +614,7 @@ function addDemoText() {
 
 	return decals.addText( {
 		points: [[ 100.848518, 22.732947 ]],
-		content: S.textContent, fontColor: S.textFontColor, fontSize: S.textFontSize,
-		fillColor: S.textFillColor, fillOpacity: S.textFillOpacity,
-		strokeColor: S.textStrokeColor, strokeWidth: S.textStrokeWidth,
-		textAlign: S.textAlign,
-		visible: S.textVisible,
+		...getTextStyleOptions(),
 	} );
 
 }
@@ -712,14 +771,24 @@ function init() {
 	addVisibleToggle( ciF, 'circle', applyCircle );
 
 	const txF = gui.addFolder( 'Text' );
-	txF.add( S, 'textContent' ).name( 'Content' ).onFinishChange( applyText );
+	addTextareaControl( txF, S, 'textContent', 'Content', applyText, 5 );
 	txF.addColor( S, 'textFontColor' ).name( 'Font Color' ).onChange( applyText );
 	txF.add( S, 'textFontSize', 12, 128, 4 ).name( 'Font Size' ).onChange( applyText );
 	txF.addColor( S, 'textFillColor' ).name( 'BG Color' ).onChange( applyText );
 	txF.add( S, 'textFillOpacity', 0, 100, 1 ).name( 'BG Opacity' ).onChange( applyText );
 	txF.addColor( S, 'textStrokeColor' ).name( 'Outline' ).onChange( applyText );
 	txF.add( S, 'textStrokeWidth', 0, 15, 1 ).name( 'Outline Width' ).onChange( applyText );
-	txF.add( S, 'textAlign', [ 'left', 'center', 'right' ] ).name( 'Align' ).onChange( applyText );
+	txF.add( S, 'textPadding', 0, 48, 1 ).name( 'Padding' ).onChange( applyText );
+	txF.add( S, 'textBoxWidth', 0, 400, 10 ).name( 'Box Width' ).onChange( applyText );
+	txF.add( S, 'textBoxHeight', 0, 400, 10 ).name( 'Box Height' ).onChange( applyText );
+	txF.add( S, 'textLayoutDirection', [ 'horizontal', 'vertical-rl', 'vertical-lr' ] ).name( 'Flow' ).onChange( applyText );
+	txF.add( S, 'textAlign', [ 'left', 'center', 'right' ] ).name( 'Text Align' ).onChange( applyText );
+	txF.add( S, 'textVerticalAlign', [ 'top', 'middle', 'bottom' ] ).name( 'Text V Align' ).onChange( applyText );
+	txF.add( S, 'textAnchorX', [ 'left', 'center', 'right' ] ).name( 'Anchor X' ).onChange( applyText );
+	txF.add( S, 'textAnchorY', [ 'top', 'middle', 'bottom' ] ).name( 'Anchor Y' ).onChange( applyText );
+	txF.add( S, 'textRotation', - 180, 180, 1 ).name( 'Rotation' ).onChange( applyText );
+	txF.add( S, 'textOffsetX', - 200, 200, 1 ).name( 'Offset X' ).onChange( applyText );
+	txF.add( S, 'textOffsetY', - 200, 200, 1 ).name( 'Offset Y' ).onChange( applyText );
 	addVisibleToggle( txF, 'text', applyText );
 
 	const arF = gui.addFolder( 'Arrow' );

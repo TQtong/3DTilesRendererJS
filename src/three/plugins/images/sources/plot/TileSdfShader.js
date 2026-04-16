@@ -334,11 +334,18 @@ void main() {
 
 			vec2 c  = vec2( readF( off + 12 ), readF( off + 13 ) );
 			vec2 hs = vec2( readF( off + 14 ), readF( off + 15 ) );
-			vec4 ub = vec4( readF( off + 16 ), readF( off + 17 ), readF( off + 18 ), readF( off + 19 ) );
+			vec2 rot = vec2( readF( off + 16 ), readF( off + 17 ) );
+			vec4 ub = vec4( readF( off + 18 ), readF( off + 19 ), readF( off + 20 ), readF( off + 21 ) );
+
+			vec2 delta = pos - c;
+			vec2 boxPos = vec2(
+				dot( delta, vec2( rot.x, rot.y ) ),
+				dot( delta, vec2( - rot.y, rot.x ) )
+			);
 
 			vec2 local = vec2(
-				( pos.x - c.x + hs.x ) / ( 2.0 * hs.x ),
-				1.0 - ( pos.y - c.y + hs.y ) / ( 2.0 * hs.y )
+				( boxPos.x + hs.x ) / ( 2.0 * hs.x ),
+				1.0 - ( boxPos.y + hs.y ) / ( 2.0 * hs.y )
 			);
 
 			if ( local.x >= 0.0 && local.x <= 1.0 && local.y >= 0.0 && local.y <= 1.0 ) {
@@ -706,11 +713,18 @@ export const PLOT_SDF_EVALUATE = /* glsl */ `
 
 			vec2 c  = vec2( plotReadF( off + 12 ), plotReadF( off + 13 ) );
 			vec2 hs = vec2( plotReadF( off + 14 ), plotReadF( off + 15 ) );
-			vec4 ub = vec4( plotReadF( off + 16 ), plotReadF( off + 17 ), plotReadF( off + 18 ), plotReadF( off + 19 ) );
+			vec2 rot = vec2( plotReadF( off + 16 ), plotReadF( off + 17 ) );
+			vec4 ub = vec4( plotReadF( off + 18 ), plotReadF( off + 19 ), plotReadF( off + 20 ), plotReadF( off + 21 ) );
+
+			vec2 delta = pos - c;
+			vec2 boxPos = vec2(
+				dot( delta, vec2( rot.x, rot.y ) ),
+				dot( delta, vec2( - rot.y, rot.x ) )
+			);
 
 			vec2 local = vec2(
-				( pos.x - c.x + hs.x ) / ( 2.0 * hs.x ),
-				1.0 - ( pos.y - c.y + hs.y ) / ( 2.0 * hs.y )
+				( boxPos.x + hs.x ) / ( 2.0 * hs.x ),
+				1.0 - ( boxPos.y + hs.y ) / ( 2.0 * hs.y )
 			);
 
 			if ( local.x >= 0.0 && local.x <= 1.0 && local.y >= 0.0 && local.y <= 1.0 ) {

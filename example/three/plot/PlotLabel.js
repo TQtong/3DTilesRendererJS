@@ -1,18 +1,31 @@
-/**
- * PlotLabel.js — 文本标绘
+﻿/**
+ * PlotLabel.js — 文本框标绘
  *
- * 对齐 PlotTextOptions = GisPlotBaseOptions & {
- *   content: string,        — 文字内容
- *   fontColor: string,      — 字体颜色
- *   fontSize: number,       — 字体大小（px）
+ * options = {
+ *   points: [[lon, lat]],
+ *   content: string,
+ *   fontColor: string,
+ *   fontSize: number,
+ *   fillColor: string,
+ *   fillOpacity: number,
+ *   strokeColor: string,
+ *   strokeWidth: number,
  *   textAlign: 'left' | 'center' | 'right',
- *   showBorder: boolean,
+ *   verticalAlign: 'top' | 'middle' | 'bottom',
+ *   anchorX: 'left' | 'center' | 'right',
+ *   anchorY: 'top' | 'middle' | 'bottom',
+ *   boxWidth: number,
+ *   boxHeight: number,
+ *   padding: number,
+ *   layoutDirection: 'horizontal' | 'vertical-rl' | 'vertical-lr',
+ *   rotation: number,
  *   offsetX: number,
  *   offsetY: number,
  * }
  *
- * options.points[0] = [lon, lat] 为标签中心坐标。
- * shader type 4（采样 label atlas 纹理）。
+ * options.points[0] is the textbox anchor point in lon / lat degrees.
+ * `textAlign` / `verticalAlign` control content alignment inside the box.
+ * `anchorX` / `anchorY` control where the box sits relative to the anchor point.
  */
 
 import { PlotBase } from './PlotBase.js';
