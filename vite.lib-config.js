@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { packageAliases } from './vite.config.js';
 
 const __dirname = path.dirname( fileURLToPath( import.meta.url ) );
+const bundledDependencies = [ 'text-to-canvas' ];
 
 export default ( { mode } ) => {
 
@@ -43,6 +44,8 @@ export default ( { mode } ) => {
 					// Rollup may normalize lib entries to "src/..." without a leading "./"
 					if ( n.startsWith( 'src/' ) ) return false;
 					if ( /^3d-tiles-renderer/.test( id ) ) return false;
+					if ( bundledDependencies.some( dep => n === dep || n.startsWith( `${dep}/` ) ) ) return false;
+					if ( /^text-to-canvas/.test( id ) ) return false;
 					return true;
 
 				},
