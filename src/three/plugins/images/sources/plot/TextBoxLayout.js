@@ -10,6 +10,12 @@ function isFiniteNumber( value ) {
 
 }
 
+function getPositiveNumberOrDefault( value, fallback ) {
+
+	return isFiniteNumber( value ) && value > 0 ? value : fallback;
+
+}
+
 function roundUp( value ) {
 
 	return Math.max( 1, Math.ceil( value ) );
@@ -687,7 +693,8 @@ export function buildTextAtlas( canvas, shapes, {
 		const lat = shape.options.points?.[ 0 ]?.[ 1 ] || 0;
 		const metersPerDegLon = getMetersPerDegreeLongitude( lat );
 		const metersPerDegLat = 111320;
-		const metersPerCanvasPx = metersPerPixel / renderScale;
+		const worldScale = getPositiveNumberOrDefault( shape.options.scale, 1 );
+		const metersPerCanvasPx = metersPerPixel * worldScale / renderScale;
 		const halfWidthMeters = width * metersPerCanvasPx / 2;
 		const halfHeightMeters = height * metersPerCanvasPx / 2;
 		const angle = ( shape.options.rotation || 0 ) * DEG2RAD;
@@ -695,8 +702,8 @@ export function buildTextAtlas( canvas, shapes, {
 		const sin = Math.sin( angle );
 		const anchorOffsetX = getAnchorOffsetX( width, layout.anchorX ) * metersPerCanvasPx;
 		const anchorOffsetY = - getAnchorOffsetY( height, layout.anchorY ) * metersPerCanvasPx;
-		const userOffsetX = ( shape.options.offsetX || 0 ) * metersPerPixel;
-		const userOffsetY = - ( shape.options.offsetY || 0 ) * metersPerPixel;
+		const userOffsetX = ( shape.options.offsetX || 0 ) * metersPerPixel * worldScale;
+		const userOffsetY = - ( shape.options.offsetY || 0 ) * metersPerPixel * worldScale;
 		const localOffsetX = anchorOffsetX + userOffsetX;
 		const localOffsetY = anchorOffsetY + userOffsetY;
 		const offsetMetersX = localOffsetX * cos - localOffsetY * sin;

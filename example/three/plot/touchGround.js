@@ -118,6 +118,7 @@ const S = {
 	textContent: '思茅区',
 	textFontColor: '#ffffff',
 	textFontSize: 64,
+	textScale: 0.05,
 	textFillColor: '#000000',
 	textFillOpacity: 60,
 	textStrokeColor: '#000000',
@@ -323,6 +324,7 @@ function getTextStyleOptions() {
 		content: S.textContent,
 		fontColor: S.textFontColor,
 		fontSize: S.textFontSize,
+		scale: S.textScale,
 		fillColor: S.textFillColor,
 		fillOpacity: S.textFillOpacity,
 		strokeColor: S.textStrokeColor,
@@ -773,7 +775,8 @@ function init() {
 	const txF = gui.addFolder( 'Text' );
 	addTextareaControl( txF, S, 'textContent', 'Content', applyText, 5 );
 	txF.addColor( S, 'textFontColor' ).name( 'Font Color' ).onChange( applyText );
-	txF.add( S, 'textFontSize', 12, 128, 4 ).name( 'Font Size' ).onChange( applyText );
+	txF.add( S, 'textFontSize', 1, 128, 1 ).name( 'Font Size' ).onChange( applyText );
+	txF.add( S, 'textScale', 0.01, 2, 0.01 ).name( 'Text Scale' ).onChange( applyText );
 	txF.addColor( S, 'textFillColor' ).name( 'BG Color' ).onChange( applyText );
 	txF.add( S, 'textFillOpacity', 0, 100, 1 ).name( 'BG Opacity' ).onChange( applyText );
 	txF.addColor( S, 'textStrokeColor' ).name( 'Outline' ).onChange( applyText );

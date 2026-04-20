@@ -18,6 +18,7 @@
  *   boxHeight: number,
  *   padding: number,
  *   layoutDirection: 'horizontal' | 'vertical-rl' | 'vertical-lr',
+ *   scale: number,
  *   rotation: number,
  *   offsetX: number,
  *   offsetY: number,
