@@ -9,6 +9,7 @@ export interface GeoReference {
 export interface Attachment {
 	mode: 'world' | 'surface' | 'tiles';
 	targetId?: string | number;
+	fallbackTargetId?: string | number;
 }
 
 export interface PlotShape {

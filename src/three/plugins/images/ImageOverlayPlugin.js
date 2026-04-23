@@ -25,6 +25,18 @@ const SPLIT_TILE_DATA = Symbol( 'SPLIT_TILE_DATA' );
 const SPLIT_HASH = Symbol( 'SPLIT_HASH' );
 const ORIGINAL_REFINE = Symbol( 'ORIGINAL_REFINE' );
 
+function createCanvasImage( width, height ) {
+
+	const canvas = typeof OffscreenCanvas !== 'undefined'
+		? new OffscreenCanvas( width, height )
+		: document.createElement( 'canvas' );
+
+	canvas.width = width;
+	canvas.height = height;
+	return canvas;
+
+}
+
 // Plugin for overlaying tiled image data on top of 3d tiles geometry.
 export class ImageOverlayPlugin {
 
@@ -650,9 +662,7 @@ export class ImageOverlayPlugin {
 
 								// clone any image bitmap textures using canvas because if we share the texture then when
 								// the clipped child is disposed then it will dispose of the parent tile texture data, as well.
-								const canvas = document.createElement( 'canvas' );
-								canvas.width = value.image.width;
-								canvas.height = value.image.height;
+								const canvas = createCanvasImage( value.image.width, value.image.height );
 
 								const ctx = canvas.getContext( '2d' );
 								ctx.scale( 1, - 1 );

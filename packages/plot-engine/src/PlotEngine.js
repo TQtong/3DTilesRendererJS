@@ -18,6 +18,7 @@ function haveCompiledChanged( previous, current ) {
 		previous.kind !== current.kind ||
 		previous.attachment?.mode !== current.attachment?.mode ||
 		previous.attachment?.targetId !== current.attachment?.targetId ||
+		previous.attachment?.fallbackTargetId !== current.attachment?.fallbackTargetId ||
 		previous.bounds?.[ 0 ] !== current.bounds?.[ 0 ] ||
 		previous.bounds?.[ 1 ] !== current.bounds?.[ 1 ] ||
 		previous.bounds?.[ 2 ] !== current.bounds?.[ 2 ] ||
@@ -50,11 +51,7 @@ function getCancelAnimationFrame() {
 
 }
 
-function logPlotEngine( ...args ) {
 
-	console.log( '[PlotEngine]', ...args );
-
-}
 
 function formatBounds( bounds ) {
 
@@ -305,22 +302,11 @@ export class PlotEngine {
 			const attachment = compiled.attachment || {};
 			if ( attachment.mode !== mode ) return false;
 			if ( attachment.targetId == null ) return true;
-			return attachment.targetId === targetId;
+			return attachment.targetId === targetId || attachment.fallbackTargetId === targetId;
 
 		} ).filter( compiled => intersectsBounds( compiled.bounds, bounds ) );
 
-		logPlotEngine( 'queryCompiledForTarget', {
-			targetId,
-			mode,
-			queryBounds: formatBounds( bounds ),
-			resultCount: results.length,
-			results: results.map( compiled => ( {
-				id: compiled.id,
-				mode: compiled.attachment?.mode,
-				targetId: compiled.attachment?.targetId ?? null,
-				bounds: formatBounds( compiled.bounds ),
-			} ) ),
-		} );
+
 
 		return results;
 
@@ -362,13 +348,7 @@ export class PlotEngine {
 		}
 
 		this.spatialIndex.load( this._compiledShapes );
-		logPlotEngine( 'compileShapes', this._compiledShapes.map( compiled => ( {
-			id: compiled.id,
-			kind: compiled.kind,
-			mode: compiled.attachment?.mode,
-			targetId: compiled.attachment?.targetId ?? null,
-			bounds: formatBounds( compiled.bounds ),
-		} ) ) );
+
 
 	}
 

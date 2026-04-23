@@ -18,11 +18,7 @@ const _size = /* @__PURE__ */ new Vector3();
 const _position = /* @__PURE__ */ new Vector3();
 const _projectedPosition = [ 0, 0, 0 ];
 
-function logTiledPipe( ...args ) {
 
-	console.log( '[PlotEngine][TiledPipe]', ...args );
-
-}
 
 function formatBounds( bounds ) {
 
@@ -60,7 +56,14 @@ function getTilesAttachmentTargetIds( compiled, loadedTargets ) {
 
 	const attachment = compiled?.attachment || {};
 	if ( ( attachment.mode ?? 'world' ) !== 'tiles' ) return [];
-	if ( attachment.targetId != null ) return [ attachment.targetId ];
+	if ( attachment.targetId != null ) {
+
+		const targetIds = new Set( [ attachment.targetId ] );
+		if ( attachment.fallbackTargetId != null ) targetIds.add( attachment.fallbackTargetId );
+		return Array.from( targetIds );
+
+	}
+
 	return loadedTargets;
 
 }
@@ -160,13 +163,7 @@ export class TiledPipe {
 
 		}
 
-		logTiledPipe( 'attachEntry', {
-			targetId: target.id,
-			entryKey,
-			visible,
-			bounds: formatBounds( bounds ),
-			sceneName: surfaceEntry.scene?.name ?? '(unnamed-scene)',
-		} );
+
 
 		this.rebuildEntry( target.id, entryKey, { force: true } );
 		return entry;
@@ -191,12 +188,7 @@ export class TiledPipe {
 
 		entry.visible = visible;
 		if ( entry.surfaceEntry ) entry.surfaceEntry.visible = visible;
-		logTiledPipe( 'setEntryVisible', {
-			targetId,
-			entryKey,
-			visible,
-			bounds: formatBounds( entry.bounds ),
-		} );
+
 		if ( visible ) {
 
 			this.rebuildEntry( targetId, entryKey, { force: true } );
@@ -289,11 +281,7 @@ export class TiledPipe {
 		const bounds = this._getEntryBounds( entry.target, entry.surfaceEntry );
 		if ( ! bounds ) {
 
-			logTiledPipe( 'rebuildEntry:noBounds', {
-				targetId,
-				entryKey,
-				sceneName: entry.scene?.name ?? '(unnamed-scene)',
-			} );
+
 			this._tileIndices.get( targetId )?.remove( entryKey );
 			entry.bounds = null;
 			entry.shapeKey = '';
@@ -309,11 +297,7 @@ export class TiledPipe {
 		const compiledShapes = this.engine._queryCompiledForTarget( targetId, entry.bounds, 'tiles' );
 		if ( compiledShapes.length === 0 ) {
 
-			logTiledPipe( 'rebuildEntry:noShapes', {
-				targetId,
-				entryKey,
-				bounds: formatBounds( entry.bounds ),
-			} );
+
 			entry.shapeKey = '';
 			this._clearTileOverlay( entry );
 			return entry;
@@ -336,17 +320,6 @@ export class TiledPipe {
 			entry.texture = buildSdfTexture( compiledShapes );
 
 		}
-
-		logTiledPipe( 'rebuildEntry', {
-			targetId,
-			entryKey,
-			bounds: formatBounds( entry.bounds ),
-			compiledShapeIds: compiledShapes.map( shape => shape.id ),
-			compiledShapeCount: compiledShapes.length,
-			geometryChanged,
-			textureDirty,
-			visible: entry.visible,
-		} );
 
 		entry.shapeKey = nextShapeKey;
 		for ( const meshEntry of this._ensureMeshEntries( entry ) ) {
@@ -374,11 +347,7 @@ export class TiledPipe {
 		const adapterBounds = adapter?.getEntryBounds?.( surfaceEntry, target );
 		if ( adapterBounds ) {
 
-			logTiledPipe( 'getEntryBounds:adapter', {
-				targetId: target.id,
-				entryKey: surfaceEntry.key,
-				bounds: formatBounds( adapterBounds ),
-			} );
+
 			return adapterBounds;
 
 		}
@@ -387,11 +356,7 @@ export class TiledPipe {
 		const customBounds = target.options.getTileBounds?.( legacyEntryKey, surfaceEntry.scene, target );
 		if ( customBounds ) {
 
-			logTiledPipe( 'getEntryBounds:custom', {
-				targetId: target.id,
-				entryKey: surfaceEntry.key,
-				bounds: formatBounds( customBounds ),
-			} );
+
 			return customBounds;
 
 		}
@@ -404,11 +369,7 @@ export class TiledPipe {
 		_box.getSize( _size );
 		if ( _size.x === 0 && _size.z === 0 ) return null;
 		const fallbackBounds = [ _box.min.x, _box.min.z, _box.max.x, _box.max.z ];
-		logTiledPipe( 'getEntryBounds:fallback', {
-			targetId: target.id,
-			entryKey: surfaceEntry.key,
-			bounds: formatBounds( fallbackBounds ),
-		} );
+
 		return fallbackBounds;
 
 	}
@@ -457,16 +418,7 @@ export class TiledPipe {
 			? false
 			: applyPlanarFallbackGeometry( geometry, position, uv, heightOffset );
 
-		logTiledPipe( 'createProjectedGeometry', {
-			targetId: entry.target.id,
-			entryKey: entry.tile,
-			meshName: mesh.name || '(unnamed-mesh)',
-			vertexCount: position.count,
-			projectedPointCount,
-			hasProjectedPoint,
-			positionChanged,
-			bounds: formatBounds( bounds ),
-		} );
+
 
 		geometry.setAttribute( 'plotUv', new Float32BufferAttribute( uv, 2 ) );
 		if ( positionChanged ) {
@@ -486,23 +438,13 @@ export class TiledPipe {
 		if ( ! compiled?.bounds ) return;
 
 		const targetIds = getTilesAttachmentTargetIds( compiled, loadedTargetIds );
-		logTiledPipe( 'markDirtyTilesForCompiled:start', {
-			compiledId: compiled.id,
-			mode: compiled.attachment?.mode,
-			targetId: compiled.attachment?.targetId ?? null,
-			bounds: formatBounds( compiled.bounds ),
-			loadedTargetIds,
-			candidateTargetIds: targetIds,
-		} );
+
 		for ( const targetId of targetIds ) {
 
 			const tileIndex = this._tileIndices.get( targetId );
 			if ( ! tileIndex ) {
 
-				logTiledPipe( 'markDirtyTilesForCompiled:noTileIndex', {
-					compiledId: compiled.id,
-					targetId,
-				} );
+
 				continue;
 
 			}
@@ -516,11 +458,7 @@ export class TiledPipe {
 			}
 
 			const matchedEntries = tileIndex.search( compiled.bounds );
-			logTiledPipe( 'markDirtyTilesForCompiled:search', {
-				compiledId: compiled.id,
-				targetId,
-				matchCount: matchedEntries.length,
-			} );
+
 			for ( const entry of matchedEntries ) {
 
 				dirtyTiles.add( entry.tile );
@@ -551,12 +489,7 @@ export class TiledPipe {
 
 		} );
 
-		logTiledPipe( 'ensureMeshEntries', {
-			targetId: entry.target.id,
-			entryKey: entry.tile,
-			meshCount: meshEntries.length,
-			meshNames: meshEntries.map( item => item.sourceMesh.name || '(unnamed-mesh)' ),
-		} );
+
 
 		entry.meshEntries = meshEntries;
 		return meshEntries;
@@ -607,12 +540,7 @@ export class TiledPipe {
 		meshEntry.ownsOverlayMaterial = false;
 		meshEntry.sourceMesh.material = meshEntry.overlayMaterial;
 
-		logTiledPipe( 'ensureWrappedMaterials', {
-			meshName: meshEntry.sourceMesh.name || '(unnamed-mesh)',
-			isArrayMaterial: Array.isArray( meshEntry.overlayMaterial ),
-			hasOriginalMaterial: Boolean( originalMaterial ),
-			ownsOverlayMaterial: meshEntry.ownsOverlayMaterial,
-		} );
+
 
 		return meshEntry.overlayMaterial;
 
@@ -637,14 +565,7 @@ export class TiledPipe {
 
 		}
 
-		logTiledPipe( 'applyEntryOverlayToMesh', {
-			targetId: entry.target.id,
-			entryKey: entry.tile,
-			meshName: meshEntry.sourceMesh.name || '(unnamed-mesh)',
-			opacity,
-			hasTexture: Boolean( entry.texture ),
-			bounds: entry.bounds,
-		} );
+
 
 	}
 

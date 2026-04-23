@@ -1009,6 +1009,7 @@ function addModelShape( shape ) {
 		attachment: {
 			mode: 'tiles',
 			targetId: SOONSPACE_TARGET_ID,
+			fallbackTargetId: TERRAIN_TARGET_ID,
 		},
 	} );
 	modelShapeIds.push( result.id );
@@ -1058,7 +1059,7 @@ function setupGui() {
 		.name( 'Selected target mode' )
 		.onChange( mode => {
 
-			if ( mode === 'surface' ) {
+			if ( mode === 'surface' || mode === 'tiles' ) {
 
 				params.showTerrain = true;
 				if ( ! tiles ) reinstantiateTiles();
