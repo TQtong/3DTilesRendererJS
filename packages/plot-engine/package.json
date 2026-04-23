@@ -1,0 +1,29 @@
+{
+  "name": "um-plot-engine",
+  "version": "0.1.0",
+  "description": "Standalone GIS plotting engine with 3D Tiles renderer integrations.",
+  "type": "module",
+  "sideEffects": false,
+  "main": "src/index.js",
+  "module": "src/index.js",
+  "types": "src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "rbush": "^4.0.1"
+  },
+  "peerDependencies": {
+    "three": ">=0.167.0"
+  },
+  "license": "Apache-2.0"
+}

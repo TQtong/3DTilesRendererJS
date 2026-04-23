@@ -6,6 +6,7 @@ import path from 'path';
 // alias order matters so longer paths are listed first.
 // Package name is um-3d-tiles-renderer; src uses that specifier. Examples may use 3d-tiles-renderer — alias both to workspace sources.
 export const packageAliases = {
+	'um-plot-engine': path.resolve( './packages/plot-engine/src/index.js' ),
 	'3d-tiles-renderer/core/plugins': path.resolve( './src/core/plugins/index.js' ),
 	'3d-tiles-renderer/three/plugins': path.resolve( './src/three/plugins/index.js' ),
 	'um-3d-tiles-renderer/core/plugins': path.resolve( './src/core/plugins/index.js' ),

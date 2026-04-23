@@ -67,6 +67,7 @@ typings/
 
 example/local-data
 example/dev-bundle
+example/bundle
 build
 
 pnpm-lock.yaml

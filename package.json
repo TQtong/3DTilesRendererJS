@@ -2,6 +2,9 @@
   "name": "um-3d-tiles-renderer",
   "version": "0.4.46",
   "description": "https://github.com/AnalyticalGraphicsInc/3d-tiles/tree/master/specification",
+  "workspaces": [
+    "packages/*"
+  ],
   "keywords": [
     "3d-tiles",
     "3dtiles",
@@ -92,6 +95,7 @@
     "start": "vite --config ./vite.config.js",
     "build-examples": "vite build --config ./vite.config.js",
     "build-lib": "vite build --config ./vite.lib-config.js",
+    "build-plot-engine": "npm --workspace um-plot-engine run build",
     "lint": "eslint . && tsc -p tsconfig.json --noEmit",
     "test": "tsc -p tsconfig.test.json --noEmit && vitest run",
     "prepublishOnly": "npm run build-lib"

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+		<meta charset="utf-8"/>
+
+		<title>PlotEngine Example</title>
+		<link rel="stylesheet" href="../styles.css">
+	</head>
+	<body>
+		<div id="info">
+			Standalone <code>um-plot-engine</code> usage example. The local board shows all built-in shape compilers;
+			Cesium terrain plus the provided SoonCPS 3D Tiles service demonstrate one engine attaching multiple <code>TilesRenderer</code> targets.
+			<div id="credits"></div>
+		</div>
+		<script type="importmap">
+		{
+			"imports": {
+				"three": "../../node_modules/three/build/three.module.js",
+				"three/": "../../node_modules/three/",
+				"earcut": "../../node_modules/earcut/src/earcut.js",
+				"text-to-canvas": "../../node_modules/text-to-canvas/dist/text-to-canvas.esm.min.js",
+				"rbush": "../../node_modules/rbush/index.js",
+				"quickselect": "../../node_modules/quickselect/index.js",
+				"um-3d-tiles-renderer": "../../src/index.js",
+				"um-3d-tiles-renderer/core/plugins": "../../src/core/plugins/index.js",
+				"um-3d-tiles-renderer/core": "../../src/core/renderer/index.js",
+				"um-3d-tiles-renderer/three/plugins": "../../src/three/plugins/index.js",
+				"um-3d-tiles-renderer/three": "../../src/three/renderer/index.js",
+				"um-3d-tiles-renderer/plugins": "../../src/plugins.js",
+				"um-plot-engine": "../../packages/plot-engine/src/index.js"
+			}
+		}
+		</script>
+		<script src="./plotEngine.js" type="module"></script>
+	</body>
+</html>

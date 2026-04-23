@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "lib": [ "dom", "es2020" ],
+    "module": "node20",
+    "moduleResolution": "node16",
+    "strict": true,
+    "types": []
+  },
+  "files": [
+    "src/index.d.ts"
+  ]
+}
