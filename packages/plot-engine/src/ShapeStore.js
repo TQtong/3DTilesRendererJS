@@ -141,6 +141,16 @@ export class ShapeStore {
 
 	}
 
+	forEachRaw( callback ) {
+
+		for ( const shape of this._shapes.values() ) {
+
+			callback( shape );
+
+		}
+
+	}
+
 	entries() {
 
 		return Array.from( this._shapes.entries(), ( [ id, shape ] ) => [ id, cloneShape( shape ) ] );

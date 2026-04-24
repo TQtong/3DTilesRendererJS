@@ -124,6 +124,112 @@ describe( 'PlotEngine', () => {
 
 	} );
 
+	test( 'batches world primitives sharing the same material', () => {
+
+		const engine = new PlotEngine();
+
+		engine.addShape( {
+			id: 'world-point-a',
+			kind: 'point',
+			coordinates: [ [ 1, 2 ] ],
+			style: { size: 8, strokeColor: '#22d3ee', opacity: 0.7 },
+		} );
+		engine.addShape( {
+			id: 'world-point-b',
+			kind: 'point',
+			coordinates: [ [ 3, 4 ] ],
+			style: { size: 8, strokeColor: '#22d3ee', opacity: 0.7 },
+		} );
+
+		engine.update();
+
+		const batch = engine.group.children[ 0 ].children[ 0 ];
+		expect( engine.group.children[ 0 ].children ).toHaveLength( 1 );
+		expect( batch.isPoints ).toBe( true );
+		expect( batch.geometry.getAttribute( 'position' ).count ).toBe( 2 );
+
+	} );
+
+	test( 'reuses pooled world materials across refreshes', () => {
+
+		const engine = new PlotEngine();
+
+		engine.addShape( {
+			id: 'polygon-a',
+			kind: 'polygon',
+			coordinates: [ [ 0, 0 ], [ 1, 0 ], [ 1, 1 ] ],
+			style: { fillColor: '#f97316', opacity: 0.6 },
+		} );
+		engine.update();
+
+		const firstMaterial = engine.group.children[ 0 ].children[ 0 ].material;
+
+		engine.addShape( {
+			id: 'polygon-b',
+			kind: 'polygon',
+			coordinates: [ [ 2, 0 ], [ 3, 0 ], [ 3, 1 ] ],
+			style: { fillColor: '#f97316', opacity: 0.6 },
+		} );
+		engine.update();
+
+		expect( engine.group.children[ 0 ].children[ 0 ].material ).toBe( firstMaterial );
+
+	} );
+
+	test( 'preserves local height for surface attachments on object targets', () => {
+
+		const engine = new PlotEngine();
+		const objectTarget = new Object3D();
+
+		engine.attachObjectTarget( 'mesh-target', objectTarget );
+		engine.addShape( {
+			id: 'surface-polygon',
+			kind: 'polygon',
+			coordinates: [ [ 0, 0, 0.25 ], [ 1, 0, 0.25 ], [ 1, 1, 0.25 ] ],
+			attachment: { mode: 'surface', targetId: 'mesh-target' },
+		} );
+
+		engine.update();
+
+		const surfaceGroup = objectTarget.children[ 0 ];
+		const surfaceMesh = surfaceGroup.children[ 0 ];
+		const position = surfaceMesh.geometry.getAttribute( 'position' );
+
+		for ( let index = 0; index < position.count; index ++ ) {
+
+			expect( position.getY( index ) ).toBeCloseTo( 0.25 );
+
+		}
+
+	} );
+
+	test( 'projects surface attachments through loaded tile targets', () => {
+
+		const loaded = createLoadedTile();
+		const tilesRenderer = new MockTilesRenderer( [ loaded ] );
+		const engine = new PlotEngine();
+
+		engine.attachTilesRenderer( 'terrain', tilesRenderer, {
+			geoReference: { kind: 'cartographic' },
+		} );
+		engine.addShape( {
+			id: 'surface-polygon',
+			kind: 'polygon',
+			coordinates: [
+				[ 0.1, 0.1 ],
+				[ 0.8, 0.1 ],
+				[ 0.8, 0.8 ],
+			],
+			attachment: { mode: 'surface', targetId: 'terrain' },
+		} );
+
+		engine.update();
+
+		expect( loaded.scene.children.length ).toBe( 2 );
+		expect( loaded.scene.children.find( child => child !== loaded.mesh ).name ).toContain( 'PlotEngine.TiledDecal' );
+
+	} );
+
 	test( 'supports multiple tiles renderers attached to one engine', () => {
 
 		const loadedA = createLoadedTileWithRegion( [ 0, 0, Math.PI / 180, Math.PI / 180 ] );

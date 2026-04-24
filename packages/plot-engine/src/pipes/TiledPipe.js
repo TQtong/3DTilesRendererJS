@@ -3,6 +3,7 @@ import {
 	Float32BufferAttribute,
 	Vector3,
 } from 'three';
+import { buildRasterPlotTexture, canBuildRasterPlotTexture } from '../RasterPlotTexture.js';
 import { buildSdfTexture } from '../SdfDataBuilder.js';
 import { SpatialIndex } from '../SpatialIndex.js';
 import { cloneBounds } from '../utils/bounds.js';
@@ -52,10 +53,11 @@ function getDecalHeightOffset( compiledShapes, fallback ) {
 
 }
 
-function getTilesAttachmentTargetIds( compiled, loadedTargets ) {
+function getProjectedAttachmentTargetIds( compiled, loadedTargets ) {
 
 	const attachment = compiled?.attachment || {};
-	if ( ( attachment.mode ?? 'world' ) !== 'tiles' ) return [];
+	const attachmentMode = attachment.mode ?? 'world';
+	if ( attachmentMode !== 'tiles' && attachmentMode !== 'surface' ) return [];
 	if ( attachment.targetId != null ) {
 
 		const targetIds = new Set( [ attachment.targetId ] );
@@ -116,6 +118,31 @@ function disposeOverlayMaterial( material, ownsMaterial = false ) {
 
 }
 
+function disposeEntryTexture( texture ) {
+
+	if ( ! texture ) return;
+
+	const image = texture.image ?? texture.source?.data ?? null;
+	texture.dispose?.();
+
+	if ( texture.source ) {
+
+		texture.source.data = null;
+
+	}
+
+	if ( image && typeof image === 'object' ) {
+
+		if ( 'data' in image ) image.data = null;
+		if ( 'width' in image ) image.width = 0;
+		if ( 'height' in image ) image.height = 0;
+
+	}
+
+	texture.image = null;
+
+}
+
 export class TiledPipe {
 
 	constructor( engine, options = {} ) {
@@ -123,6 +150,8 @@ export class TiledPipe {
 		this.engine = engine;
 		this.opacity = options.opacity ?? 1;
 		this.heightOffset = options.heightOffset ?? 0;
+		this.rasterize = options.rasterize ?? true;
+		this.rasterTextureSize = options.rasterTextureSize ?? 512;
 		this._loadedTiles = new Map();
 		this._tileIndices = new Map();
 
@@ -155,6 +184,7 @@ export class TiledPipe {
 				bounds: bounds ? cloneBounds( bounds ) : null,
 				meshEntries: null,
 				texture: null,
+				textureMode: 'vector',
 				shapeKey: '',
 				geometryKey: '',
 			};
@@ -286,6 +316,7 @@ export class TiledPipe {
 			entry.bounds = null;
 			entry.shapeKey = '';
 			entry.geometryKey = '';
+			entry.textureMode = 'vector';
 			this._clearTileOverlay( entry );
 			return entry;
 
@@ -294,11 +325,12 @@ export class TiledPipe {
 		const boundsChanged = ! sameBounds( entry.bounds, bounds );
 		if ( boundsChanged ) this._updateTileBounds( targetId, entry, bounds );
 
-		const compiledShapes = this.engine._queryCompiledForTarget( targetId, entry.bounds, 'tiles' );
+		const compiledShapes = this.engine._queryCompiledForTarget( targetId, entry.bounds, [ 'tiles', 'surface' ] );
 		if ( compiledShapes.length === 0 ) {
 
 
 			entry.shapeKey = '';
+			entry.textureMode = 'vector';
 			this._clearTileOverlay( entry );
 			return entry;
 
@@ -309,15 +341,14 @@ export class TiledPipe {
 		const nextShapeKey = getTileShapeKey( compiledShapes );
 		const textureDirty =
 			options.force === true ||
-			boundsChanged ||
-			geometryChanged ||
 			entry.texture === null ||
 			entry.shapeKey !== nextShapeKey;
 
 		if ( textureDirty ) {
 
-			if ( entry.texture ) entry.texture.dispose();
-			entry.texture = buildSdfTexture( compiledShapes );
+			if ( entry.texture ) disposeEntryTexture( entry.texture );
+			entry.texture = this._buildTileTexture( compiledShapes, entry.bounds );
+			entry.textureMode = entry.texture?.userData?.mode ?? 'vector';
 
 		}
 
@@ -330,6 +361,23 @@ export class TiledPipe {
 		}
 
 		return entry;
+
+	}
+
+	_buildTileTexture( compiledShapes, bounds ) {
+
+		if ( this.rasterize && canBuildRasterPlotTexture() ) {
+
+			const rasterTexture = buildRasterPlotTexture( compiledShapes, bounds, {
+				size: this.rasterTextureSize,
+			} );
+			if ( rasterTexture ) return rasterTexture;
+
+		}
+
+		const texture = buildSdfTexture( compiledShapes );
+		texture.userData.mode = 'vector';
+		return texture;
 
 	}
 
@@ -437,7 +485,7 @@ export class TiledPipe {
 
 		if ( ! compiled?.bounds ) return;
 
-		const targetIds = getTilesAttachmentTargetIds( compiled, loadedTargetIds );
+		const targetIds = getProjectedAttachmentTargetIds( compiled, loadedTargetIds );
 
 		for ( const targetId of targetIds ) {
 
@@ -551,7 +599,7 @@ export class TiledPipe {
 		const opacity = entry.visible && entry.texture ? this.opacity : 0;
 		const applyMaterial = material => {
 
-			updateWrappedTiledSdfMaterial( material, entry.texture, entry.bounds, opacity );
+			updateWrappedTiledSdfMaterial( material, entry.texture, entry.bounds, opacity, entry.textureMode );
 
 		};
 
@@ -573,7 +621,7 @@ export class TiledPipe {
 
 		if ( entry.texture ) {
 
-			entry.texture.dispose();
+			disposeEntryTexture( entry.texture );
 			entry.texture = null;
 
 		}
@@ -638,6 +686,7 @@ export class TiledPipe {
 		entry.meshEntries = null;
 		entry.geometryKey = '';
 		entry.shapeKey = '';
+		entry.textureMode = 'vector';
 
 	}
 

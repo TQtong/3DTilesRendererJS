@@ -6,6 +6,7 @@ export class SurfacePipe {
 	constructor() {
 
 		this._groups = new Map();
+		this._objects = new Map();
 
 	}
 
@@ -16,6 +17,7 @@ export class SurfacePipe {
 		group.name = `PlotEngine.SurfacePipe.${ target.id }`;
 		target.object3D.add( group );
 		this._groups.set( target.id, group );
+		this._objects.set( target.id, new Map() );
 
 	}
 
@@ -29,18 +31,48 @@ export class SurfacePipe {
 
 		}
 
-		while ( group.children.length > 0 ) {
+		const objects = this._objects.get( target.id ) || new Map();
+		this._objects.set( target.id, objects );
 
-			const child = group.children[ 0 ];
-			group.remove( child );
-			disposeObjectTree( child );
+		const nextIds = new Set();
+		for ( const compiled of compiledShapes ) {
+
+			nextIds.add( compiled.id );
+			const objectKey = `${ compiled.id }:${ compiled.revision }`;
+			let entry = objects.get( compiled.id ) || null;
+
+			if ( ! entry || entry.key !== objectKey ) {
+
+				if ( entry?.object ) {
+
+					group.remove( entry.object );
+					disposeObjectTree( entry.object );
+
+				}
+
+				const object = createPrimitiveObject( compiled );
+				if ( ! object ) {
+
+					objects.delete( compiled.id );
+					continue;
+
+				}
+
+				entry = { key: objectKey, object };
+				objects.set( compiled.id, entry );
+
+			}
+
+			group.add( entry.object );
 
 		}
 
-		for ( const compiled of compiledShapes ) {
+		for ( const [ id, entry ] of objects ) {
 
-			const object = createPrimitiveObject( compiled );
-			if ( object ) group.add( object );
+			if ( nextIds.has( id ) ) continue;
+			group.remove( entry.object );
+			disposeObjectTree( entry.object );
+			objects.delete( id );
 
 		}
 
@@ -53,6 +85,7 @@ export class SurfacePipe {
 		disposeObjectTree( group );
 		group.removeFromParent();
 		this._groups.delete( targetId );
+		this._objects.delete( targetId );
 
 	}
 

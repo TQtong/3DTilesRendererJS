@@ -51,18 +51,55 @@ const SOONSPACE_LON_DEG = 110.425983;
 const SOONSPACE_LAT_DEG = 32.993182;
 const SOONSPACE_LON = SOONSPACE_LON_DEG * MathUtils.DEG2RAD;
 const SOONSPACE_LAT = SOONSPACE_LAT_DEG * MathUtils.DEG2RAD;
-const SOONSPACE_POLYGON_COORDINATES = [
-	[ 110.419158, 32.986995 ],
-	[ 110.431158, 32.987995 ],
-	[ 110.432658, 32.997995 ],
-	[ 110.420158, 32.999495 ],
-];
+const DEFAULT_DEMO_PLOT_COUNT = 100;
+const DEMO_PLOT_BATCH_SIZE = 5000;
+const DEMO_PLOT_LON_STEP = 0.0012;
+const DEMO_PLOT_LAT_STEP = 0.0012;
+const DEMO_PLOT_SIZE = 0.00042;
+const DEMO_PLOT_STROKE_WIDTH = 0.00006;
+const LOCAL_SURFACE_BOARD_SPAN = 72;
+const CONDITIONAL_TILE_UPDATE_FRAMES = 45;
 const SOONSPACE_POLYGON_STYLE = {
 	fillColor: '#22d3ee',
 	strokeColor: '#ecfeff',
 	strokeWidth: 0,
 	opacity: 0.55,
 };
+const DEMO_WORLD_PLOT_TYPES = [
+	'point',
+	'line',
+	'polyline',
+	'polygon',
+	'rectangle',
+	'circle',
+	'sector',
+	'arrow',
+];
+const DEMO_TILE_PLOT_TYPES = [
+	'point',
+	'polygon',
+	'rectangle',
+	'circle',
+	'sector',
+	'arrow',
+];
+const DEMO_SURFACE_PLOT_TYPES = [
+	'polygon',
+	'rectangle',
+	'circle',
+	'sector',
+	'arrow',
+];
+const DEMO_PLOT_COLORS = [
+	'#22d3ee',
+	'#f97316',
+	'#a78bfa',
+	'#84cc16',
+	'#f43f5e',
+	'#38bdf8',
+	'#facc15',
+	'#fb7185',
+];
 const _beijingFrame = new Matrix4();
 const _globeSceneFrame = new Matrix4().makeRotationX( - Math.PI / 2 );
 const _groupInverse = new Matrix4();
@@ -85,8 +122,15 @@ const _loadedSceneSize = new Vector3();
 const _tileCartographic = {};
 const _cartographicPosition = new Vector3();
 const noopRaycast = () => {};
+const _lastConditionalUpdateCameraMatrix = new Matrix4();
 
 let localTargetPlacementState = 'auto-fallback';
+let demoGenerationHandle = null;
+let demoGenerationToken = 0;
+let demoGenerationProgress = null;
+let conditionalUpdateCameraInitialized = false;
+let terrainConditionalUpdateFrames = CONDITIONAL_TILE_UPDATE_FRAMES;
+let modelConditionalUpdateFrames = CONDITIONAL_TILE_UPDATE_FRAMES;
 
 const params = {
 	ionAssetId: '1',
@@ -99,6 +143,7 @@ const params = {
 	soonModelVisible: true,
 	localOpacity: 0.75,
 	worldHeight: 0,
+	demoPlotCount: DEFAULT_DEMO_PLOT_COUNT,
 	targetMode: 'world',
 	reloadTerrain: reinstantiateTiles,
 	reloadSoonModel: reinstantiateModelTiles,
@@ -187,6 +232,7 @@ function updateTerrainVisibility() {
 	if ( tiles ) {
 
 		tiles.group.visible = params.terrainVisible;
+		requestConditionalTilesUpdates();
 
 	}
 
@@ -197,14 +243,48 @@ function updateSoonModelVisibility() {
 	if ( modelTiles ) {
 
 		modelTiles.group.visible = params.soonModelVisible;
+		requestConditionalTilesUpdates();
 
 	}
 
 }
 
+function requestConditionalTilesUpdates( frames = CONDITIONAL_TILE_UPDATE_FRAMES ) {
+
+	terrainConditionalUpdateFrames = Math.max( terrainConditionalUpdateFrames, frames );
+	modelConditionalUpdateFrames = Math.max( modelConditionalUpdateFrames, frames );
+
+}
+
+function hasMatrixChanged( left, right, epsilon = 1e-8 ) {
+
+	const leftElements = left.elements;
+	const rightElements = right.elements;
+	for ( let index = 0; index < 16; index ++ ) {
+
+		if ( Math.abs( leftElements[ index ] - rightElements[ index ] ) > epsilon ) return true;
+
+	}
+
+	return false;
+
+}
+
+function shouldUpdateExternalTiles( visible, forcedFrames, cameraChanged ) {
+
+	if ( ! visible ) return false;
+	if ( params.targetMode !== 'world' ) return true;
+	return forcedFrames > 0 || cameraChanged;
+
+}
+
 function setupPlotEngine() {
 
-	plotEngine = new PlotEngine();
+	plotEngine = new PlotEngine( {
+		tiledPipe: {
+			rasterize: false,
+		},
+	} );
 	scene.add( plotEngine.group );
 	plotEngine.setMode( params.targetMode );
 	plotEngine.start();
@@ -652,6 +732,7 @@ function reinstantiateTiles() {
 
 	tiles.setResolutionFromRenderer( camera, renderer );
 	tiles.setCamera( camera );
+	requestConditionalTilesUpdates();
 	syncControlsEllipsoid();
 
 }
@@ -752,6 +833,7 @@ function reinstantiateModelTiles() {
 
 	modelTiles.setResolutionFromRenderer( camera, renderer );
 	modelTiles.setCamera( camera );
+	requestConditionalTilesUpdates();
 	syncControlsEllipsoid();
 
 }
@@ -784,51 +866,19 @@ function frameLocalTarget() {
 function resetShapes( options = {} ) {
 
 	const frameCamera = options.frameCamera !== false;
-
-	for ( const id of [ ...worldShapeIds, ...localShapeIds, ...terrainShapeIds, ...modelShapeIds ] ) {
-
-		plotEngine.removeShape( id );
-
-	}
-
-	worldShapeIds.length = 0;
-	localShapeIds.length = 0;
-	terrainShapeIds.length = 0;
-	modelShapeIds.length = 0;
+	clearDemoShapes();
 
 	if ( params.targetMode === 'tiles' ) {
 
-		addModelDemoShapes();
+		addModelDemoShapes( frameCamera );
 
 	} else if ( params.targetMode === 'world' ) {
 
-		addWorldDemoShapes();
+		addWorldDemoShapes( frameCamera );
 
 	} else {
 
-		addSurfaceDemoShapes();
-
-	}
-
-	plotEngine.invalidate();
-	plotEngine.update();
-	if ( ! frameCamera ) {
-
-		return;
-
-	}
-
-	if ( params.targetMode === 'tiles' ) {
-
-		frameSoonModel();
-
-	} else if ( params.targetMode === 'surface' ) {
-
-		frameTerrain();
-
-	} else {
-
-		frameLocalTarget();
+		addSurfaceDemoShapes( frameCamera );
 
 	}
 
@@ -842,6 +892,19 @@ function withDefaultHeight( shape, defaultHeight = DEFAULT_SHAPE_HEIGHT ) {
 			point[ 0 ],
 			point[ 1 ],
 			point[ 2 ] ?? defaultHeight,
+		] ),
+	};
+
+}
+
+function withForcedHeight( shape, height ) {
+
+	return {
+		...shape,
+		coordinates: ( shape.coordinates || [] ).map( point => [
+			point[ 0 ],
+			point[ 1 ],
+			height,
 		] ),
 	};
 
@@ -924,87 +987,445 @@ function cartographicShapeToWorldShape( shape ) {
 
 }
 
-function getSoonspacePolygonShape( id = 'sooncps-aoi', style = SOONSPACE_POLYGON_STYLE ) {
+function getDemoPlotCount() {
+
+	return Math.max( 1, Number( params.demoPlotCount ?? DEFAULT_DEMO_PLOT_COUNT ) || DEFAULT_DEMO_PLOT_COUNT );
+
+}
+
+function getDemoPlotGridColumns( totalCount ) {
+
+	return Math.max( 1, Math.ceil( Math.sqrt( totalCount ) ) );
+
+}
+
+function getDemoPlotOffset( index, totalCount = getDemoPlotCount() ) {
+
+	const columns = getDemoPlotGridColumns( totalCount );
+	const column = index % columns;
+	const row = Math.floor( index / columns );
+	const rows = Math.ceil( totalCount / columns );
 
 	return {
-		id,
-		kind: 'polygon',
-		coordinates: SOONSPACE_POLYGON_COORDINATES.map( point => [ ...point ] ),
-		style: { ...style },
+		lon: ( column - ( columns - 1 ) * 0.5 ) * DEMO_PLOT_LON_STEP,
+		lat: ( row - ( rows - 1 ) * 0.5 ) * DEMO_PLOT_LAT_STEP,
 	};
 
 }
 
-function addWorldDemoShapes() {
+function getDemoPlotStyle( index, overrides = {} ) {
 
-	addWorldShape( cartographicShapeToWorldShape( getSoonspacePolygonShape() ), params.worldHeight );
+	const color = DEMO_PLOT_COLORS[ index % DEMO_PLOT_COLORS.length ];
 
-}
-
-function addSurfaceDemoShapes() {
-
-	addTerrainShape( getSoonspacePolygonShape( 'surface-polygon', {
+	return {
 		...SOONSPACE_POLYGON_STYLE,
-	} ) );
+		fillColor: color,
+		strokeColor: '#ecfeff',
+		strokeWidth: DEMO_PLOT_STROKE_WIDTH,
+		opacity: 0.62,
+		...overrides,
+	};
 
 }
 
-function addTerrainDemoShapes() {
+function getDemoPlotCenter( index, totalCount ) {
 
-	addTerrainShape( getSoonspacePolygonShape( 'terrain-aoi', {
-		...SOONSPACE_POLYGON_STYLE,
-		fillColor: '#f97316',
-		strokeColor: '#fed7aa',
-		opacity: 0.6,
-	} ) );
-
-}
-
-function addModelDemoShapes() {
-
-	addModelShape( getSoonspacePolygonShape() );
+	const offset = getDemoPlotOffset( index, totalCount );
+	return [
+		SOONSPACE_LON_DEG + offset.lon,
+		SOONSPACE_LAT_DEG + offset.lat,
+	];
 
 }
 
-function addWorldShape( shape, defaultHeight = params.worldHeight ) {
+function getLocalDemoPlotCenter( index, totalCount ) {
 
-	const result = plotEngine.addShape( withDefaultHeight( shape, defaultHeight ) );
+	const columns = getDemoPlotGridColumns( totalCount );
+	const rows = Math.ceil( totalCount / columns );
+	const column = index % columns;
+	const row = Math.floor( index / columns );
+	const stepX = LOCAL_SURFACE_BOARD_SPAN / Math.max( columns, 1 );
+	const stepY = LOCAL_SURFACE_BOARD_SPAN / Math.max( rows, 1 );
+
+	return [
+		( column - ( columns - 1 ) * 0.5 ) * stepX,
+		( row - ( rows - 1 ) * 0.5 ) * stepY,
+	];
+
+}
+
+function getDemoPlotShape( index, idPrefix, options = {} ) {
+
+	const id = `${ idPrefix }-${ index }`;
+	const types = options.types || DEMO_WORLD_PLOT_TYPES;
+	const kind = types[ index % types.length ];
+	const totalCount = options.totalCount ?? getDemoPlotCount();
+	const [ lon, lat ] = options.coordinateSpace === 'local'
+		? getLocalDemoPlotCenter( index, totalCount )
+		: getDemoPlotCenter( index, totalCount );
+	const size = options.size ?? DEMO_PLOT_SIZE;
+	const halfSize = size * 0.5;
+	const style = getDemoPlotStyle( index, options.styleOverrides );
+
+	if ( kind === 'point' ) {
+
+		return {
+			id,
+			kind,
+			coordinates: [ [ lon, lat ] ],
+			style: {
+				...style,
+				size: size,
+				strokeWidth: 0,
+			},
+		};
+
+	}
+
+	if ( kind === 'line' ) {
+
+		return {
+			id,
+			kind,
+			coordinates: [
+				[ lon - halfSize, lat - halfSize ],
+				[ lon + halfSize, lat + halfSize ],
+			],
+			style: {
+				...style,
+				fillColor: '#000000',
+				strokeWidth: DEMO_PLOT_STROKE_WIDTH * 1.6,
+			},
+		};
+
+	}
+
+	if ( kind === 'polyline' ) {
+
+		return {
+			id,
+			kind,
+			coordinates: [
+				[ lon - halfSize, lat - halfSize ],
+				[ lon, lat + halfSize ],
+				[ lon + halfSize, lat - halfSize * 0.2 ],
+			],
+			style: {
+				...style,
+				fillColor: '#000000',
+				strokeWidth: DEMO_PLOT_STROKE_WIDTH * 1.5,
+			},
+		};
+
+	}
+
+	if ( kind === 'polygon' ) {
+
+		return {
+			id,
+			kind,
+			coordinates: [
+				[ lon, lat + halfSize ],
+				[ lon + halfSize, lat ],
+				[ lon + halfSize * 0.25, lat - halfSize ],
+				[ lon - halfSize, lat - halfSize * 0.35 ],
+			],
+			style,
+		};
+
+	}
+
+	if ( kind === 'rectangle' ) {
+
+		return {
+			id,
+			kind,
+			coordinates: [
+				[ lon - halfSize, lat - halfSize * 0.7 ],
+				[ lon + halfSize, lat + halfSize * 0.7 ],
+			],
+			style,
+		};
+
+	}
+
+	if ( kind === 'circle' ) {
+
+		return {
+			id,
+			kind,
+			coordinates: [ [ lon, lat ] ],
+			style: {
+				...style,
+				radius: halfSize,
+			},
+		};
+
+	}
+
+	if ( kind === 'sector' ) {
+
+		return {
+			id,
+			kind,
+			coordinates: [ [ lon, lat ] ],
+			style: {
+				...style,
+				radius: halfSize,
+				startAngle: ( index % 8 ) * Math.PI * 0.25,
+				sectorAngle: Math.PI * 1.25,
+			},
+		};
+
+	}
+
+	return {
+		id,
+		kind: 'arrow',
+		coordinates: [
+			[ lon - halfSize, lat - halfSize * 0.4 ],
+			[ lon + halfSize, lat + halfSize * 0.4 ],
+		],
+		style: {
+			...style,
+			width: size * 0.28,
+			headLength: size * 0.45,
+		},
+	};
+
+}
+
+function addSoonspaceDemoShapes( addShape, idPrefix, options = {} ) {
+
+	const totalCount = options.totalCount ?? getDemoPlotCount();
+	const startIndex = options.startIndex ?? 0;
+	const endIndex = Math.min( options.endIndex ?? totalCount, totalCount );
+
+	for ( let index = startIndex; index < endIndex; index ++ ) {
+
+		addShape( getDemoPlotShape( index, idPrefix, {
+			...options,
+			totalCount,
+		} ) );
+
+	}
+
+}
+
+function cancelDemoGeneration() {
+
+	demoGenerationToken ++;
+	if ( demoGenerationHandle !== null ) {
+
+		cancelAnimationFrame( demoGenerationHandle );
+		demoGenerationHandle = null;
+
+	}
+
+	demoGenerationProgress = null;
+
+}
+
+function clearDemoShapes() {
+
+	cancelDemoGeneration();
+	plotEngine.stop();
+	plotEngine.clearShapes();
+	worldShapeIds.length = 0;
+	localShapeIds.length = 0;
+	terrainShapeIds.length = 0;
+	modelShapeIds.length = 0;
+
+}
+
+function finalizeDemoShapes( frameCamera ) {
+
+	plotEngine.invalidate();
+	plotEngine.update();
+	plotEngine.start();
+	demoGenerationProgress = null;
+
+	if ( ! frameCamera ) return;
+
+	if ( params.targetMode === 'tiles' ) {
+
+		frameSoonModel();
+
+	} else if ( params.targetMode === 'surface' ) {
+
+		frameTerrain();
+
+	} else {
+
+		frameLocalTarget();
+
+	}
+
+}
+
+function populateDemoShapes( addShape, idPrefix, options = {}, frameCamera = true ) {
+
+	const totalCount = getDemoPlotCount();
+	const token = ++ demoGenerationToken;
+	let startIndex = 0;
+
+	demoGenerationProgress = {
+		current: 0,
+		total: totalCount,
+	};
+
+	const step = () => {
+
+		if ( token !== demoGenerationToken ) return;
+
+		const endIndex = Math.min( startIndex + DEMO_PLOT_BATCH_SIZE, totalCount );
+		addSoonspaceDemoShapes( addShape, idPrefix, {
+			...options,
+			totalCount,
+			startIndex,
+			endIndex,
+		} );
+		startIndex = endIndex;
+		demoGenerationProgress.current = startIndex;
+
+		if ( startIndex < totalCount ) {
+
+			demoGenerationHandle = requestAnimationFrame( step );
+
+		} else {
+
+			demoGenerationHandle = null;
+			finalizeDemoShapes( frameCamera );
+
+		}
+
+	};
+
+	step();
+
+}
+
+function addWorldDemoShapes( frameCamera = true ) {
+
+	populateDemoShapes(
+		shape => addWorldShape(
+			cartographicShapeToWorldShape( shape ),
+			params.worldHeight,
+			false,
+		),
+		'world-aoi',
+		{
+			types: DEMO_WORLD_PLOT_TYPES,
+			styleOverrides: {
+				opacity: params.localOpacity,
+			},
+		},
+		frameCamera,
+	);
+
+}
+
+function addSurfaceDemoShapes( frameCamera = true ) {
+
+	populateDemoShapes( shape => addSurfaceShape( shape, false ), 'surface-aoi', {
+		types: DEMO_SURFACE_PLOT_TYPES,
+		styleOverrides: {
+			strokeWidth: 0,
+			opacity: params.localOpacity,
+		},
+	}, frameCamera );
+
+}
+
+function addTerrainDemoShapes( frameCamera = true ) {
+
+	populateDemoShapes( shape => addTerrainShape( shape, false ), 'terrain-aoi', {
+		types: DEMO_TILE_PLOT_TYPES,
+		styleOverrides: {
+			...SOONSPACE_POLYGON_STYLE,
+			fillColor: '#f97316',
+			strokeColor: '#fed7aa',
+			strokeWidth: 0,
+			opacity: 0.6,
+		},
+	}, frameCamera );
+
+}
+
+function addModelDemoShapes( frameCamera = true ) {
+
+	populateDemoShapes( shape => addModelShape( shape, false ), 'model-aoi', {
+		types: DEMO_TILE_PLOT_TYPES,
+		styleOverrides: {
+			strokeWidth: 0,
+		},
+	}, frameCamera );
+
+}
+
+function addWorldShape( shape, defaultHeight = params.worldHeight, shouldInvalidate = true ) {
+
+	const result = plotEngine.shapeStore.add( withForcedHeight( {
+		...shape,
+		style: {
+			...( shape.style || {} ),
+			altitude: defaultHeight,
+		},
+	}, defaultHeight ) );
+	if ( shouldInvalidate ) plotEngine.invalidate();
 	worldShapeIds.push( result.id );
 	return result;
 
 }
 
-function addLocalShape( shape ) {
+function addLocalShape( shape, shouldInvalidate = true ) {
 
-	const result = plotEngine.addShape( {
+	const result = plotEngine.shapeStore.add( {
 		...withDefaultHeight( shape, 0.1 ),
 		attachment: {
 			mode: 'surface',
 			targetId: 'local-board',
 		},
 	} );
+	if ( shouldInvalidate ) plotEngine.invalidate();
 	localShapeIds.push( result.id );
 	return result;
 
 }
 
-function addTerrainShape( shape ) {
+function addTerrainShape( shape, shouldInvalidate = true ) {
 
-	const result = plotEngine.addShape( {
+	const result = plotEngine.shapeStore.add( {
 		...withDefaultHeight( shape, 0 ),
 		attachment: {
 			mode: 'tiles',
 			targetId: TERRAIN_TARGET_ID,
 		},
 	} );
+	if ( shouldInvalidate ) plotEngine.invalidate();
 	terrainShapeIds.push( result.id );
 	return result;
 
 }
 
-function addModelShape( shape ) {
+function addSurfaceShape( shape, shouldInvalidate = true ) {
 
-	const result = plotEngine.addShape( {
+	const result = plotEngine.shapeStore.add( {
+		...withDefaultHeight( shape, 0 ),
+		attachment: {
+			mode: 'surface',
+			targetId: TERRAIN_TARGET_ID,
+		},
+	} );
+	if ( shouldInvalidate ) plotEngine.invalidate();
+	terrainShapeIds.push( result.id );
+	return result;
+
+}
+
+function addModelShape( shape, shouldInvalidate = true ) {
+
+	const result = plotEngine.shapeStore.add( {
 		...withDefaultHeight( shape, 0 ),
 		attachment: {
 			mode: 'tiles',
@@ -1012,6 +1433,7 @@ function addModelShape( shape ) {
 			fallbackTargetId: TERRAIN_TARGET_ID,
 		},
 	} );
+	if ( shouldInvalidate ) plotEngine.invalidate();
 	modelShapeIds.push( result.id );
 	return result;
 
@@ -1047,6 +1469,13 @@ function updateWorldHeight( value ) {
 
 }
 
+function updateDemoPlotCount( value ) {
+
+	params.demoPlotCount = Number( value );
+	resetShapes( { frameCamera: false } );
+
+}
+
 function setupGui() {
 
 	const gui = new GUI();
@@ -1068,6 +1497,7 @@ function setupGui() {
 			}
 
 			plotEngine.setMode( mode );
+			requestConditionalTilesUpdates();
 			resetShapes( { frameCamera: false } );
 
 		} );
@@ -1076,6 +1506,15 @@ function setupGui() {
 	gui.add( params, 'showSoonModel' ).name( 'Show SoonCPS model' ).onChange( reinstantiateModelTiles );
 	gui.add( params, 'localOpacity', 0.1, 1, 0.05 ).name( 'Local opacity' ).onChange( updateLocalOpacity );
 	gui.add( params, 'worldHeight', - 2000, 10000, 10 ).name( 'World height' ).onChange( updateWorldHeight );
+	gui.add( params, 'demoPlotCount', {
+		100: 100,
+		500: 500,
+		1000: 1000,
+		100000: 100000,
+		1000000: 1000000,
+	} )
+		.name( 'Plot count' )
+		.onChange( updateDemoPlotCount );
 	gui.add( params, 'randomizeLocal' ).name( 'Move local target' );
 	gui.add( params, 'resetShapes' ).name( 'Reset shapes' );
 
@@ -1099,7 +1538,7 @@ function setupGui() {
 
 function updateLocalOpacity() {
 
-	for ( const id of [ ...worldShapeIds, ...localShapeIds ] ) {
+	for ( const id of [ ...worldShapeIds, ...localShapeIds, ...terrainShapeIds, ...modelShapeIds ] ) {
 
 		plotEngine.updateShape( id, {
 			style: {
@@ -1126,22 +1565,34 @@ function animate() {
 	requestAnimationFrame( animate );
 
 	controls.update();
+	camera.updateMatrixWorld();
+	const cameraChanged = ! conditionalUpdateCameraInitialized ||
+		hasMatrixChanged( camera.matrixWorld, _lastConditionalUpdateCameraMatrix );
+	if ( cameraChanged ) {
 
-	if ( tiles ) {
-
-		tiles.setResolutionFromRenderer( camera, renderer );
-		tiles.setCamera( camera );
-		camera.updateMatrixWorld();
-		tiles.update();
+		_lastConditionalUpdateCameraMatrix.copy( camera.matrixWorld );
+		conditionalUpdateCameraInitialized = true;
 
 	}
 
-	if ( modelTiles ) {
+	const shouldUpdateTerrain = shouldUpdateExternalTiles( params.terrainVisible, terrainConditionalUpdateFrames, cameraChanged );
+	const shouldUpdateModel = shouldUpdateExternalTiles( params.soonModelVisible, modelConditionalUpdateFrames, cameraChanged );
+
+	if ( tiles && shouldUpdateTerrain ) {
+
+		tiles.setResolutionFromRenderer( camera, renderer );
+		tiles.setCamera( camera );
+		tiles.update();
+		if ( terrainConditionalUpdateFrames > 0 ) terrainConditionalUpdateFrames --;
+
+	}
+
+	if ( modelTiles && shouldUpdateModel ) {
 
 		modelTiles.setResolutionFromRenderer( camera, renderer );
 		modelTiles.setCamera( camera );
-		camera.updateMatrixWorld();
 		modelTiles.update();
+		if ( modelConditionalUpdateFrames > 0 ) modelConditionalUpdateFrames --;
 
 	}
 
@@ -1165,6 +1616,9 @@ function updateCredits() {
 		: params.showSoonModel
 			? 'SoonCPS model loading or unavailable'
 			: 'SoonCPS model disabled';
-	credits.innerText = `PlotEngine: ${ plotEngine.shapeStore.size } shapes, mode=${ params.targetMode }, ${ terrainStatus }, ${ modelStatus }`;
+	const generationStatus = demoGenerationProgress
+		? `, generating ${ demoGenerationProgress.current }/${ demoGenerationProgress.total }`
+		: '';
+	credits.innerText = `PlotEngine: ${ plotEngine.shapeStore.size }/${ getDemoPlotCount() } shapes, mode=${ params.targetMode }${ generationStatus }, ${ terrainStatus }, ${ modelStatus }`;
 
 }

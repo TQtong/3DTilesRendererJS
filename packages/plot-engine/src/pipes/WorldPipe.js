@@ -1,5 +1,9 @@
 import { Group } from 'three';
-import { createPrimitiveObject, disposeObjectTree } from './primitiveFactory.js';
+import {
+	createBatchedPrimitiveGroup,
+	disposeObjectTree,
+	PrimitiveMaterialPool,
+} from './primitiveFactory.js';
 
 export class WorldPipe {
 
@@ -7,6 +11,7 @@ export class WorldPipe {
 
 		this.group = new Group();
 		this.group.name = 'PlotEngine.WorldPipe';
+		this._materialPool = new PrimitiveMaterialPool();
 
 	}
 
@@ -16,22 +21,26 @@ export class WorldPipe {
 
 			const child = this.group.children[ 0 ];
 			this.group.remove( child );
-			disposeObjectTree( child );
+			disposeObjectTree( child, { disposeMaterials: false } );
 
 		}
 
-		for ( const compiled of compiledShapes ) {
+		const batchedGroup = createBatchedPrimitiveGroup( compiledShapes, {
+			materialPool: this._materialPool,
+		} );
+		while ( batchedGroup.children.length > 0 ) {
 
-			const object = createPrimitiveObject( compiled );
-			if ( object ) this.group.add( object );
+			this.group.add( batchedGroup.children[ 0 ] );
 
 		}
+		this._materialPool.releaseExcept( new Set( batchedGroup.userData.plotMaterialKeys || [] ) );
 
 	}
 
 	dispose() {
 
 		this.refresh( [] );
+		this._materialPool.dispose();
 
 	}
 

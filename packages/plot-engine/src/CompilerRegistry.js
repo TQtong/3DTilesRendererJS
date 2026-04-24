@@ -5,11 +5,18 @@ export class CompilerRegistry {
 	constructor( options = {} ) {
 
 		this._compilers = new Map();
+		this._revision = 0;
 		if ( options.defaultCompilers !== false ) {
 
 			registerDefaultCompilers( this );
 
 		}
+
+	}
+
+	get revision() {
+
+		return this._revision;
 
 	}
 
@@ -22,13 +29,16 @@ export class CompilerRegistry {
 		}
 
 		this._compilers.set( kind, compiler );
+		this._revision ++;
 		return this;
 
 	}
 
 	unregister( kind ) {
 
-		return this._compilers.delete( kind );
+		const removed = this._compilers.delete( kind );
+		if ( removed ) this._revision ++;
+		return removed;
 
 	}
 

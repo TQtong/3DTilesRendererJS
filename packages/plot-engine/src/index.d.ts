@@ -143,6 +143,7 @@ export class PlotEngine {
 	addShape( shape: PlotShape ): PlotShape;
 	updateShape( id: string | number, patch: Partial<PlotShape> ): PlotShape;
 	removeShape( id: string | number ): boolean;
+	clearShapes(): this;
 	select( ids: string | number | Array<string | number> | null | undefined ): Array<string | number>;
 	setMode( mode: string ): string;
 	attachTilesRenderer( id: string | number, tilesRenderer: any, options?: PlotTargetOptions ): TilesRendererTarget;

@@ -3,6 +3,7 @@ import {
 	FloatType,
 	NearestFilter,
 	RGBAFormat,
+	Vector2,
 	Vector4,
 } from 'three';
 
@@ -26,16 +27,24 @@ const vertexPreamble = /* glsl */`
 
 const fragmentPreamble = /* glsl */`
 	uniform sampler2D plotSdfTexture;
-	uniform float plotSdfTextureWidth;
+	uniform vec2 plotSdfTextureSize;
 	uniform vec4 plotTileBounds;
 	uniform float plotOpacity;
+	uniform float plotRasterMode;
 	varying vec2 vPlotUv;
 
 	float plotGetValue( float index ) {
 
 		float texelIndex = floor( index / 4.0 );
 		float channel = mod( index, 4.0 );
-		vec2 uv = vec2( ( texelIndex + 0.5 ) / max( plotSdfTextureWidth, 1.0 ), 0.5 );
+		float width = max( plotSdfTextureSize.x, 1.0 );
+		float height = max( plotSdfTextureSize.y, 1.0 );
+		float texelX = mod( texelIndex, width );
+		float texelY = floor( texelIndex / width );
+		vec2 uv = vec2(
+			( texelX + 0.5 ) / width,
+			( texelY + 0.5 ) / height
+		);
 		vec4 texel = texture2D( plotSdfTexture, uv );
 		if ( channel < 0.5 ) return texel.r;
 		if ( channel < 1.5 ) return texel.g;
@@ -148,20 +157,37 @@ const fragmentPreamble = /* glsl */`
 	vec4 plotSampleShape( float offset, vec2 coord ) {
 
 		float shapeType = plotGetValue( offset );
-		vec4 fill = vec4(
+		vec4 shapeBounds = vec4(
 			plotGetValue( offset + 2.0 ),
 			plotGetValue( offset + 3.0 ),
 			plotGetValue( offset + 4.0 ),
 			plotGetValue( offset + 5.0 )
 		);
-		vec4 stroke = vec4(
+		vec4 fill = vec4(
 			plotGetValue( offset + 6.0 ),
 			plotGetValue( offset + 7.0 ),
 			plotGetValue( offset + 8.0 ),
 			plotGetValue( offset + 9.0 )
 		);
-		float strokeWidth = plotGetValue( offset + 10.0 );
-		float payloadOffset = offset + 12.0;
+		vec4 stroke = vec4(
+			plotGetValue( offset + 10.0 ),
+			plotGetValue( offset + 11.0 ),
+			plotGetValue( offset + 12.0 ),
+			plotGetValue( offset + 13.0 )
+		);
+		float strokeWidth = plotGetValue( offset + 14.0 );
+		float payloadOffset = offset + 16.0;
+		float boundsPadding = max( strokeWidth * 0.5, 0.0 );
+		if (
+			coord.x < shapeBounds.x - boundsPadding ||
+			coord.y < shapeBounds.y - boundsPadding ||
+			coord.x > shapeBounds.z + boundsPadding ||
+			coord.y > shapeBounds.w + boundsPadding
+		) {
+
+			return vec4( 0.0 );
+
+		}
 
 		float signedDistance = 1e20;
 		bool supportsFill = true;
@@ -224,23 +250,32 @@ const fragmentPreamble = /* glsl */`
 const fragmentApply = /* glsl */`
 	if ( plotOpacity > 1e-4 ) {
 
-		vec2 coord = plotGetCoord();
-		float shapeCount = plotGetValue( 0.0 );
-		float offset = 1.0;
 		vec4 plotColor = vec4( 0.0 );
 
-		for ( int shapeIndex = 0; shapeIndex < 128; shapeIndex ++ ) {
+		if ( plotRasterMode > 0.5 ) {
 
-			if ( float( shapeIndex ) >= shapeCount ) break;
+			plotColor = texture2D( plotSdfTexture, vPlotUv );
 
-			vec4 shapeColor = plotSampleShape( offset, coord );
-			if ( shapeColor.a > 0.0 ) {
+		} else {
 
-				plotColor = plotBlend( plotColor, shapeColor );
+			vec2 coord = plotGetCoord();
+			float shapeCount = plotGetValue( 0.0 );
+			float offset = 1.0;
+
+			for ( int shapeIndex = 0; shapeIndex < 128; shapeIndex ++ ) {
+
+				if ( float( shapeIndex ) >= shapeCount ) break;
+
+				vec4 shapeColor = plotSampleShape( offset, coord );
+				if ( shapeColor.a > 0.0 ) {
+
+					plotColor = plotBlend( plotColor, shapeColor );
+
+				}
+
+				offset += plotGetValue( offset + 1.0 );
 
 			}
-
-			offset += plotGetValue( offset + 1.0 );
 
 		}
 
@@ -254,12 +289,6 @@ const fragmentApply = /* glsl */`
 
 	}
 `;
-
-function logTiledSdfMaterial( ...args ) {
-
-	console.log( '[PlotEngine][TiledSdfMaterial]', ...args );
-
-}
 
 function getState( material ) {
 
@@ -277,7 +306,10 @@ function ensureUserData( material ) {
 function assignTexture( state, nextTexture ) {
 
 	state.uniforms.plotSdfTexture.value = nextTexture;
-	state.uniforms.plotSdfTextureWidth.value = nextTexture.image?.width ?? 1;
+	state.uniforms.plotSdfTextureSize.value.set(
+		nextTexture.image?.width ?? 1,
+		nextTexture.image?.height ?? 1,
+	);
 
 }
 
@@ -297,9 +329,10 @@ export function wrapTiledSdfMaterial( material ) {
 	const state = {
 		uniforms: {
 			plotSdfTexture: { value: EMPTY_TEXTURE },
-			plotSdfTextureWidth: { value: 1 },
+			plotSdfTextureSize: { value: new Vector2( 1, 1 ) },
 			plotTileBounds: { value: new Vector4() },
 			plotOpacity: { value: 0 },
+			plotRasterMode: { value: 0 },
 		},
 		previousOnBeforeCompile,
 		previousProgramCacheKey,
@@ -310,10 +343,6 @@ export function wrapTiledSdfMaterial( material ) {
 	material.onBeforeCompile = shader => {
 
 		previousOnBeforeCompile?.( shader );
-		logTiledSdfMaterial( 'onBeforeCompile', {
-			materialName: material.name || '(unnamed-material)',
-			materialType: material.type || '(unknown-type)',
-		} );
 
 		shader.uniforms = {
 			...shader.uniforms,
@@ -341,7 +370,7 @@ export function wrapTiledSdfMaterial( material ) {
 	material.customProgramCacheKey = () => {
 
 		const previousKey = previousProgramCacheKey ? previousProgramCacheKey() : '';
-		return `${ previousKey }|plot-engine-tiled-sdf-v2`;
+		return `${ previousKey }|plot-engine-tiled-sdf-v3`;
 
 	};
 
@@ -350,7 +379,7 @@ export function wrapTiledSdfMaterial( material ) {
 
 }
 
-export function updateWrappedTiledSdfMaterial( material, texture, bounds, opacity = 1 ) {
+export function updateWrappedTiledSdfMaterial( material, texture, bounds, opacity = 1, mode = 'vector' ) {
 
 	const state = wrapTiledSdfMaterial( material );
 	if ( ! state ) return null;
@@ -358,6 +387,7 @@ export function updateWrappedTiledSdfMaterial( material, texture, bounds, opacit
 	assignTexture( state, texture ?? EMPTY_TEXTURE );
 	state.uniforms.plotTileBounds.value.set( bounds[ 0 ], bounds[ 1 ], bounds[ 2 ], bounds[ 3 ] );
 	state.uniforms.plotOpacity.value = texture ? opacity : 0;
+	state.uniforms.plotRasterMode.value = mode === 'raster' ? 1 : 0;
 	return state;
 
 }
@@ -369,6 +399,7 @@ export function clearWrappedTiledSdfMaterial( material ) {
 
 	assignTexture( state, EMPTY_TEXTURE );
 	state.uniforms.plotOpacity.value = 0;
+	state.uniforms.plotRasterMode.value = 0;
 
 }
 

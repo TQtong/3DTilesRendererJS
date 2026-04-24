@@ -51,7 +51,7 @@ function getCancelAnimationFrame() {
 
 }
 
-
+const MAX_DETAILED_COMPILED_CHANGES = 50000;
 
 function formatBounds( bounds ) {
 
@@ -81,7 +81,10 @@ export class PlotEngine {
 
 		this._compiledShapes = [];
 		this._compiledShapeMap = new Map();
+		this._compiledCache = new Map();
 		this._compiledChanges = [];
+		this._compilerRegistryRevision = this.compilerRegistry.revision;
+		this._shapeStoreRevision = this.shapeStore.revision;
 		this._integrations = new Map();
 		this._running = false;
 		this._dirty = true;
@@ -154,6 +157,34 @@ export class PlotEngine {
 		const removed = this.shapeStore.remove( id );
 		if ( removed ) this.invalidate();
 		return removed;
+
+	}
+
+	clearShapes() {
+
+		this.shapeStore.clear();
+		this._compiledShapes = [];
+		this._compiledShapeMap = new Map();
+		this._compiledCache.clear();
+		this._compiledChanges = [];
+		this._compilerRegistryRevision = this.compilerRegistry.revision;
+		this._shapeStoreRevision = this.shapeStore.revision;
+		this.spatialIndex.clear();
+		this.worldPipe.refresh( [] );
+
+		for ( const target of this.targetRegistry.values() ) {
+
+			if ( target.type === 'object' ) {
+
+				this.surfacePipe.refreshTarget( target, [] );
+
+			}
+
+		}
+
+		this.tiledPipe.refreshAll();
+		this._dirty = false;
+		return this;
 
 	}
 
@@ -297,10 +328,13 @@ export class PlotEngine {
 
 	_queryCompiledForTarget( targetId, bounds, mode ) {
 
+		const modes = Array.isArray( mode ) ? mode : [ mode ];
+
 		const results = this.spatialIndex.search( bounds ).filter( compiled => {
 
 			const attachment = compiled.attachment || {};
-			if ( attachment.mode !== mode ) return false;
+			const attachmentMode = attachment.mode ?? 'world';
+			if ( ! modes.includes( attachmentMode ) ) return false;
 			if ( attachment.targetId == null ) return true;
 			return attachment.targetId === targetId || attachment.fallbackTargetId === targetId;
 
@@ -315,9 +349,48 @@ export class PlotEngine {
 	_compileShapes() {
 
 		const previousCompiledShapeMap = this._compiledShapeMap;
-		this._compiledShapes = this.compilerRegistry.compileMany( this.shapeStore.values() );
-		this._compiledShapeMap = new Map( this._compiledShapes.map( compiled => [ compiled.id, compiled ] ) );
+		const previousCompiledCount = previousCompiledShapeMap.size;
+		if (
+			this._compilerRegistryRevision !== this.compilerRegistry.revision ||
+			this._shapeStoreRevision !== this.shapeStore.revision
+		) {
+
+			this._compiledCache.clear();
+			this._compilerRegistryRevision = this.compilerRegistry.revision;
+			this._shapeStoreRevision = this.shapeStore.revision;
+
+		}
+
+		const nextCompiledCache = new Map();
+		this._compiledShapes = [];
+		this.shapeStore.forEachRaw( shape => {
+
+			const cached = this._compiledCache.get( shape.id );
+			const compiled = cached && cached.revision === shape.revision
+				? cached.compiled
+				: this.compilerRegistry.compile( shape );
+
+			nextCompiledCache.set( shape.id, {
+				revision: shape.revision,
+				compiled,
+			} );
+
+			if ( compiled ) this._compiledShapes.push( compiled );
+
+		} );
+
+		this._compiledCache = nextCompiledCache;
 		this._compiledChanges = [];
+		const shouldTrackDetailedChanges = previousCompiledCount + this._compiledShapes.length <= MAX_DETAILED_COMPILED_CHANGES;
+		if ( ! shouldTrackDetailedChanges ) {
+
+			this._compiledShapeMap = new Map();
+			this.spatialIndex.load( this._compiledShapes );
+			return;
+
+		}
+
+		this._compiledShapeMap = new Map( this._compiledShapes.map( compiled => [ compiled.id, compiled ] ) );
 
 		for ( const [ id, compiled ] of this._compiledShapeMap ) {
 
@@ -354,17 +427,33 @@ export class PlotEngine {
 
 	_refreshPipes( compiledChanges = [] ) {
 
-		this.worldPipe.refresh( this._compiledShapes.filter( compiled => ( compiled.attachment?.mode ?? 'world' ) === 'world' ) );
+		const worldShapes = [];
+		const surfaceShapes = [];
+		for ( const compiled of this._compiledShapes ) {
+
+			const mode = compiled.attachment?.mode ?? 'world';
+			if ( mode === 'world' ) {
+
+				worldShapes.push( compiled );
+
+			} else if ( mode === 'surface' ) {
+
+				surfaceShapes.push( compiled );
+
+			}
+
+		}
+
+		this.worldPipe.refresh( worldShapes );
 
 		for ( const target of this.targetRegistry.values() ) {
 
 			if ( target.type === 'object' ) {
 
-				this.surfacePipe.refreshTarget( target, this._compiledShapes.filter( compiled => {
+				this.surfacePipe.refreshTarget( target, surfaceShapes.filter( compiled => {
 
-					const mode = compiled.attachment?.mode ?? 'world';
 					const targetId = compiled.attachment?.targetId;
-					return mode === 'surface' && ( targetId == null || targetId === target.id );
+					return targetId == null || targetId === target.id;
 
 				} ) );
 
