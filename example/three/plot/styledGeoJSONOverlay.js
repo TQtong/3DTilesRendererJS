@@ -2,8 +2,8 @@
  * StyledGeoJSONOverlay 手动验证页面。
  *
  * 本页面只创建一个 StyledGeoJSONOverlay。页面启动时只加载一个普洱市区县
- * GeoJSON，后续通过 GUI 按需加载其他区县，并用 geojson-merge-ts 合并成一个
- * FeatureCollection 交给同一个 overlay。
+ * GeoJSON，后续通过 GUI 按需加载其他区县，并通过 overlay 暴露的合并方法
+ * 生成一个 FeatureCollection 交给同一个 overlay。
  */
 import { Scene, WebGLRenderer, PerspectiveCamera, MathUtils } from 'three';
 import { TilesRenderer, GlobeControls, CAMERA_FRAME } from 'um-3d-tiles-renderer';
@@ -15,7 +15,6 @@ import {
 	XYZTilesPlugin,
 } from 'um-3d-tiles-renderer/plugins';
 import GUI from 'three/examples/jsm/libs/lil-gui.module.min.js';
-import { merge } from 'geojson-merge-ts';
 
 let scene, renderer, camera, controls, tiles, overlay, gui;
 
@@ -413,8 +412,8 @@ async function ensureAreaLoaded( definition ) {
 
 function decorateAreaGeoJSON( definition, geojson ) {
 
-	// geojson-merge-ts 可以把 Geometry、Feature、FeatureCollection 统一规范为 FeatureCollection。
-	const normalized = merge( [ geojson ] );
+	// 规范化逻辑收在 StyledGeoJSONOverlay 内部, 示例页不再直接 import geojson-merge-ts。
+	const normalized = overlay.normalizeGeoJSON( geojson );
 	const style = areaStyles.get( definition.id );
 
 	normalized.features = normalized.features.map( ( feature, index ) => {
@@ -564,11 +563,16 @@ function commitMergedGeoJSON( definitions = getEnabledDefinitions() ) {
 
 	}
 
-	const merged = inputs.length > 0 ? merge( inputs ) : EMPTY_GEOJSON;
+	const merged = inputs.length > 0 ? overlay.setMergedGeoJSON( inputs ) : EMPTY_GEOJSON;
 	lastMergeTime = performance.now() - startTime;
 	mergedCoordinateCount = coordinateCount;
 	mergedGeometryTypes = [ ...geometryTypes ].join( ', ' ) || '-';
-	overlay.setGeoJSON( merged );
+
+	if ( inputs.length === 0 ) {
+
+		overlay.setGeoJSON( merged );
+
+	}
 
 }
 

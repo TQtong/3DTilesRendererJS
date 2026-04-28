@@ -15,6 +15,10 @@ import { WMSImageSource } from './sources/WMSImageSource.js';
 import { TiledRegionImageSource } from './sources/RegionImageSource.js';
 import { TiledTextureComposer } from './overlays/TiledTextureComposer.js';
 import { UrlTemplateImageSource } from './sources/UrlTemplateImageSource.js';
+import {
+	merge as mergeGeoJSONRoots,
+	normalizeGeoJSON as normalizeGeoJSONRoot,
+} from 'geojson-merge-ts';
 
 const _matrix = /* @__PURE__ */ new Matrix4();
 const _vec = /* @__PURE__ */ new Vector3();
@@ -1809,11 +1813,36 @@ export class StyledGeoJSONOverlay extends ImageOverlay {
 
 	}
 
+	normalizeGeoJSON( geojson ) {
+
+		// 将 Geometry、Feature、FeatureCollection 统一成 FeatureCollection。
+		// 业务层只需要依赖 overlay, 不需要额外 import geojson-merge-ts。
+		return normalizeGeoJSONRoot( geojson );
+
+	}
+
+	mergeGeoJSON( geojsonList ) {
+
+		// 合并多个 GeoJSON 根对象并返回新的 FeatureCollection。
+		// 这里只做数据合并, 不修改当前 overlay, 方便调用方先加工 feature 样式。
+		return mergeGeoJSONRoots( geojsonList );
+
+	}
+
 	setGeoJSON( geojson, options ) {
 
 		const result = this.imageSource.setGeoJSON( geojson, options );
 		this.requestUpdate();
 		return result;
+
+	}
+
+	setMergedGeoJSON( geojsonList, options ) {
+
+		// 常用入口: 外部传入多个区县或图层的 GeoJSON, overlay 内部完成合并后立即刷新。
+		const merged = this.mergeGeoJSON( geojsonList );
+		this.setGeoJSON( merged, options );
+		return merged;
 
 	}
 

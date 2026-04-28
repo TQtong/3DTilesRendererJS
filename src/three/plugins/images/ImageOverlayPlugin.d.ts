@@ -119,7 +119,13 @@ export class StyledGeoJSONOverlay extends ImageOverlay {
 	geojson: any;
 
 	redraw(): void;
+	// 把任意 GeoJSON 根对象规范成 FeatureCollection, 不修改当前 overlay。
+	normalizeGeoJSON( geojson: any ): any;
+	// 合并多个 GeoJSON 根对象并返回 FeatureCollection, 不修改当前 overlay。
+	mergeGeoJSON( geojsonList: ReadonlyArray<any> ): any;
 	setGeoJSON( geojson: any, options?: { redraw?: boolean } ): void;
+	// 合并多个 GeoJSON 根对象后设置到当前 overlay, 并返回合并结果。
+	setMergedGeoJSON( geojsonList: ReadonlyArray<any>, options?: { redraw?: boolean } ): any;
 	getFeatureById( id: string | number ): any | null;
 	syncFeature( feature: any, options?: { redraw?: boolean } ): any;
 	syncFeatureById( id: string | number, options?: { redraw?: boolean } ): any;
