@@ -58,14 +58,7 @@ function getProjectedAttachmentTargetIds( compiled, loadedTargets ) {
 	const attachment = compiled?.attachment || {};
 	const attachmentMode = attachment.mode ?? 'world';
 	if ( attachmentMode !== 'tiles' && attachmentMode !== 'surface' ) return [];
-	if ( attachment.targetId != null ) {
-
-		const targetIds = new Set( [ attachment.targetId ] );
-		if ( attachment.fallbackTargetId != null ) targetIds.add( attachment.fallbackTargetId );
-		return Array.from( targetIds );
-
-	}
-
+	if ( attachment.targetId != null ) return [ attachment.targetId ];
 	return loadedTargets;
 
 }

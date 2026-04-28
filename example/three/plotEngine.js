@@ -1396,7 +1396,7 @@ function addLocalShape( shape, shouldInvalidate = true ) {
 function addTerrainShape( shape, shouldInvalidate = true ) {
 
 	const result = plotEngine.shapeStore.add( {
-		...withDefaultHeight( shape, 0 ),
+		...withDefaultHeight( shape, params.worldHeight ),
 		attachment: {
 			mode: 'tiles',
 			targetId: TERRAIN_TARGET_ID,
@@ -1411,7 +1411,7 @@ function addTerrainShape( shape, shouldInvalidate = true ) {
 function addSurfaceShape( shape, shouldInvalidate = true ) {
 
 	const result = plotEngine.shapeStore.add( {
-		...withDefaultHeight( shape, 0 ),
+		...withForcedHeight( shape, params.worldHeight ),
 		attachment: {
 			mode: 'surface',
 			targetId: TERRAIN_TARGET_ID,
@@ -1426,11 +1426,10 @@ function addSurfaceShape( shape, shouldInvalidate = true ) {
 function addModelShape( shape, shouldInvalidate = true ) {
 
 	const result = plotEngine.shapeStore.add( {
-		...withDefaultHeight( shape, 0 ),
+		...withDefaultHeight( shape, params.worldHeight ),
 		attachment: {
 			mode: 'tiles',
 			targetId: SOONSPACE_TARGET_ID,
-			fallbackTargetId: TERRAIN_TARGET_ID,
 		},
 	} );
 	if ( shouldInvalidate ) plotEngine.invalidate();
@@ -1461,11 +1460,7 @@ function randomizeLocalShapes() {
 function updateWorldHeight( value ) {
 
 	params.worldHeight = Number( value );
-	if ( params.targetMode === 'world' ) {
-
-		resetShapes( { frameCamera: false } );
-
-	}
+	resetShapes( { frameCamera: false } );
 
 }
 

@@ -336,11 +336,9 @@ export class PlotEngine {
 			const attachmentMode = attachment.mode ?? 'world';
 			if ( ! modes.includes( attachmentMode ) ) return false;
 			if ( attachment.targetId == null ) return true;
-			return attachment.targetId === targetId || attachment.fallbackTargetId === targetId;
+			return attachment.targetId === targetId;
 
 		} ).filter( compiled => intersectsBounds( compiled.bounds, bounds ) );
-
-
 
 		return results;
 
@@ -448,14 +446,16 @@ export class PlotEngine {
 
 		for ( const target of this.targetRegistry.values() ) {
 
+			const matched = surfaceShapes.filter( compiled => {
+
+				const targetId = compiled.attachment?.targetId;
+				return targetId == null || targetId === target.id;
+
+			} );
+
 			if ( target.type === 'object' ) {
 
-				this.surfacePipe.refreshTarget( target, surfaceShapes.filter( compiled => {
-
-					const targetId = compiled.attachment?.targetId;
-					return targetId == null || targetId === target.id;
-
-				} ) );
+				this.surfacePipe.refreshTarget( target, matched );
 
 			}
 

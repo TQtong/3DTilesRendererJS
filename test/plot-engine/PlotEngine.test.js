@@ -8,6 +8,7 @@ import {
 	Object3D,
 } from 'three';
 import { PlotEngine } from '../../packages/plot-engine/src/PlotEngine.js';
+import { WGS84_ELLIPSOID } from '../../src/three/renderer/math/GeoConstants.js';
 
 class MockTilesRenderer extends EventDispatcher {
 
@@ -15,6 +16,13 @@ class MockTilesRenderer extends EventDispatcher {
 
 		super();
 		this._items = items;
+		this.group = new Group();
+		this.ellipsoid = WGS84_ELLIPSOID;
+		for ( const item of items ) {
+
+			this.group.add( item.scene );
+
+		}
 
 	}
 
@@ -60,11 +68,13 @@ function createLoadedTileWithRegion( region ) {
 
 describe( 'PlotEngine', () => {
 
-	test( 'rebuilds tiled decals for loaded tile models and removes them on detach', () => {
+	test( 'wraps tile mesh material and adds plotUv attribute for tiles attachments', () => {
 
 		const loaded = createLoadedTile();
 		const tilesRenderer = new MockTilesRenderer( [ loaded ] );
 		const engine = new PlotEngine();
+		const originalMaterial = loaded.mesh.material;
+		const originalGeometry = loaded.mesh.geometry;
 
 		engine.attachTilesRenderer( 'terrain', tilesRenderer, {
 			geoReference: { kind: 'cartographic' },
@@ -81,20 +91,13 @@ describe( 'PlotEngine', () => {
 		} );
 		engine.update();
 
-		expect( loaded.scene.children.length ).toBe( 2 );
-		const decal = loaded.scene.children.find( child => child !== loaded.mesh );
-		expect( decal.name ).toContain( 'PlotEngine.TiledDecal' );
-
-		tilesRenderer.dispatchEvent( {
-			type: 'tile-visibility-change',
-			tile: loaded.tile,
-			scene: loaded.scene,
-			visible: false,
-		} );
-		expect( decal.visible ).toBe( false );
+		expect( loaded.scene.children.length ).toBe( 1 );
+		expect( loaded.mesh.geometry.getAttribute( 'plotUv' ) ).toBeDefined();
+		expect( typeof loaded.mesh.material.onBeforeCompile ).toBe( 'function' );
 
 		engine.detachTarget( 'terrain' );
-		expect( loaded.scene.children ).toHaveLength( 1 );
+		expect( loaded.mesh.material ).toBe( originalMaterial );
+		expect( loaded.mesh.geometry ).toBe( originalGeometry );
 
 	} );
 
@@ -203,11 +206,13 @@ describe( 'PlotEngine', () => {
 
 	} );
 
-	test( 'projects surface attachments through loaded tile targets', () => {
+	test( 'projects surface attachments through loaded terrain tile targets', () => {
 
 		const loaded = createLoadedTile();
 		const tilesRenderer = new MockTilesRenderer( [ loaded ] );
 		const engine = new PlotEngine();
+		const originalMaterial = loaded.mesh.material;
+		const originalGeometry = loaded.mesh.geometry;
 
 		engine.attachTilesRenderer( 'terrain', tilesRenderer, {
 			geoReference: { kind: 'cartographic' },
@@ -222,11 +227,56 @@ describe( 'PlotEngine', () => {
 			],
 			attachment: { mode: 'surface', targetId: 'terrain' },
 		} );
-
 		engine.update();
 
-		expect( loaded.scene.children.length ).toBe( 2 );
-		expect( loaded.scene.children.find( child => child !== loaded.mesh ).name ).toContain( 'PlotEngine.TiledDecal' );
+		expect( loaded.scene.children.length ).toBe( 1 );
+		expect( loaded.mesh.geometry.getAttribute( 'plotUv' ) ).toBeDefined();
+		expect( typeof loaded.mesh.material.onBeforeCompile ).toBe( 'function' );
+		expect( loaded.mesh.geometry ).not.toBe( originalGeometry );
+
+		tilesRenderer.dispatchEvent( {
+			type: 'tile-visibility-change',
+			tile: loaded.tile,
+			scene: loaded.scene,
+			visible: false,
+		} );
+		expect( loaded.mesh.geometry.getAttribute( 'plotUv' ) ).toBeDefined();
+
+		engine.detachTarget( 'terrain' );
+		expect( loaded.mesh.material ).toBe( originalMaterial );
+		expect( loaded.mesh.geometry ).toBe( originalGeometry );
+
+	} );
+
+	test( 'surface mode only paints the target terrain tiles', () => {
+
+		const terrainLoaded = createLoadedTileWithRegion( [ 0, 0, Math.PI / 180, Math.PI / 180 ] );
+		const modelLoaded = createLoadedTileWithRegion( [ 0, 0, Math.PI / 180, Math.PI / 180 ] );
+		const terrainRenderer = new MockTilesRenderer( [ terrainLoaded ] );
+		const modelRenderer = new MockTilesRenderer( [ modelLoaded ] );
+		const engine = new PlotEngine();
+
+		engine.attachTilesRenderer( 'terrain', terrainRenderer, {
+			geoReference: { kind: 'cartographic' },
+		} );
+		engine.attachTilesRenderer( 'model', modelRenderer, {
+			geoReference: { kind: 'cartographic' },
+		} );
+
+		engine.addShape( {
+			id: 'surface-polygon',
+			kind: 'polygon',
+			coordinates: [
+				[ 0.1, 0.1 ],
+				[ 0.8, 0.1 ],
+				[ 0.8, 0.8 ],
+			],
+			attachment: { mode: 'surface', targetId: 'terrain' },
+		} );
+		engine.update();
+
+		expect( terrainLoaded.mesh.geometry.getAttribute( 'plotUv' ) ).toBeDefined();
+		expect( modelLoaded.mesh.geometry.getAttribute( 'plotUv' ) ).toBeUndefined();
 
 	} );
 
@@ -272,22 +322,11 @@ describe( 'PlotEngine', () => {
 
 		engine.update();
 
-		expect( loadedA.scene.children.length ).toBe( 2 );
-		expect( loadedB.scene.children.length ).toBe( 2 );
-		expect( loadedA.scene.children.find( child => child !== loadedA.mesh ).name ).toContain( 'terrain-a' );
-		expect( loadedB.scene.children.find( child => child !== loadedB.mesh ).name ).toContain( 'terrain-b' );
+		expect( loadedA.mesh.geometry.getAttribute( 'plotUv' ) ).toBeDefined();
+		expect( loadedB.mesh.geometry.getAttribute( 'plotUv' ) ).toBeDefined();
 
 		engine.detachTarget( 'terrain-a' );
-		expect( loadedA.scene.children ).toHaveLength( 1 );
-		expect( loadedB.scene.children ).toHaveLength( 2 );
-
-		tilesRendererB.dispatchEvent( {
-			type: 'tile-visibility-change',
-			tile: loadedB.tile,
-			scene: loadedB.scene,
-			visible: false,
-		} );
-		expect( loadedB.scene.children.find( child => child !== loadedB.mesh ).visible ).toBe( false );
+		expect( loadedB.mesh.geometry.getAttribute( 'plotUv' ) ).toBeDefined();
 
 	} );
 
@@ -305,7 +344,7 @@ describe( 'PlotEngine', () => {
 
 	} );
 
-	test( 'incrementally rebuilds only affected tiles', () => {
+	test( 'incrementally rebuilds only tiles whose bounds intersect updated shapes', () => {
 
 		const loadedA = createLoadedTileWithRegion( [ 0, 0, Math.PI / 180, Math.PI / 180 ] );
 		const loadedB = createLoadedTileWithRegion( [ Math.PI / 90, 0, Math.PI / 60, Math.PI / 180 ] );
@@ -328,9 +367,9 @@ describe( 'PlotEngine', () => {
 		} );
 		engine.update();
 
-		const decalA = loadedA.scene.children.find( child => child !== loadedA.mesh );
-		const decalAGeometry = decalA.geometry;
-		expect( loadedB.scene.children ).toHaveLength( 1 );
+		const meshAGeometry = loadedA.mesh.geometry;
+		expect( meshAGeometry.getAttribute( 'plotUv' ) ).toBeDefined();
+		expect( loadedB.mesh.geometry.getAttribute( 'plotUv' ) ).toBeUndefined();
 
 		engine.addShape( {
 			id: 'polygon-b',
@@ -344,17 +383,47 @@ describe( 'PlotEngine', () => {
 		} );
 		engine.update();
 
-		expect( loadedA.scene.children.find( child => child !== loadedA.mesh ) ).toBe( decalA );
-		expect( loadedA.scene.children.find( child => child !== loadedA.mesh ).geometry ).toBe( decalAGeometry );
-		expect( loadedB.scene.children.length ).toBe( 2 );
+		expect( loadedA.mesh.geometry ).toBe( meshAGeometry );
+		expect( loadedB.mesh.geometry.getAttribute( 'plotUv' ) ).toBeDefined();
 
 	} );
 
-	test( 'reuses tile decal geometry when only SDF data changes', () => {
+	test( 'tiles mode only paints on primary target tiles', () => {
 
 		const loadedA = createLoadedTileWithRegion( [ 0, 0, Math.PI / 180, Math.PI / 180 ] );
-		const loadedB = createLoadedTileWithRegion( [ Math.PI / 90, 0, Math.PI / 60, Math.PI / 180 ] );
-		const tilesRenderer = new MockTilesRenderer( [ loadedA, loadedB ] );
+		const loadedB = createLoadedTileWithRegion( [ 0, 0, Math.PI / 180, Math.PI / 180 ] );
+		const rendererA = new MockTilesRenderer( [ loadedA ] );
+		const rendererB = new MockTilesRenderer( [ loadedB ] );
+		const engine = new PlotEngine();
+
+		engine.attachTilesRenderer( 'a', rendererA, {
+			geoReference: { kind: 'cartographic' },
+		} );
+		engine.attachTilesRenderer( 'b', rendererB, {
+			geoReference: { kind: 'cartographic' },
+		} );
+
+		engine.addShape( {
+			id: 'polygon-a',
+			kind: 'polygon',
+			coordinates: [
+				[ 0.1, 0.1 ],
+				[ 0.8, 0.1 ],
+				[ 0.8, 0.8 ],
+			],
+			attachment: { mode: 'tiles', targetId: 'a' },
+		} );
+		engine.update();
+
+		expect( loadedA.mesh.geometry.getAttribute( 'plotUv' ) ).toBeDefined();
+		expect( loadedB.mesh.geometry.getAttribute( 'plotUv' ) ).toBeUndefined();
+
+	} );
+
+	test( 'reuses tile geometry when only style changes', () => {
+
+		const loadedA = createLoadedTileWithRegion( [ 0, 0, Math.PI / 180, Math.PI / 180 ] );
+		const tilesRenderer = new MockTilesRenderer( [ loadedA ] );
 		const engine = new PlotEngine();
 
 		engine.attachTilesRenderer( 'terrain', tilesRenderer, {
@@ -371,32 +440,17 @@ describe( 'PlotEngine', () => {
 			],
 			attachment: { mode: 'tiles', targetId: 'terrain' },
 		} );
-		engine.addShape( {
-			id: 'polygon-b',
-			kind: 'polygon',
-			coordinates: [
-				[ 2.2, 0.1 ],
-				[ 2.8, 0.1 ],
-				[ 2.8, 0.8 ],
-			],
-			attachment: { mode: 'tiles', targetId: 'terrain' },
-		} );
 		engine.update();
 
-		const decalA = loadedA.scene.children.find( child => child !== loadedA.mesh );
-		const decalB = loadedB.scene.children.find( child => child !== loadedB.mesh );
-		const decalAGeometry = decalA.geometry;
-		const decalBGeometry = decalB.geometry;
+		const decoratedGeometry = loadedA.mesh.geometry;
+		expect( decoratedGeometry.getAttribute( 'plotUv' ) ).toBeDefined();
 
 		engine.updateShape( 'polygon-a', {
 			style: { fillColor: '#ff0000', strokeColor: '#00ff00' },
 		} );
 		engine.update();
 
-		expect( loadedA.scene.children.find( child => child !== loadedA.mesh ) ).toBe( decalA );
-		expect( loadedB.scene.children.find( child => child !== loadedB.mesh ) ).toBe( decalB );
-		expect( decalA.geometry ).toBe( decalAGeometry );
-		expect( decalB.geometry ).toBe( decalBGeometry );
+		expect( loadedA.mesh.geometry ).toBe( decoratedGeometry );
 
 	} );
 
