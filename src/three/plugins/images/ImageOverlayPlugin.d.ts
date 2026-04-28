@@ -25,6 +25,7 @@ export class ImageOverlay {
 	frame: Matrix4 | null;
 	fetchOptions: any;
 	preprocessURL: ( url: string ) => string | null;
+	requestUpdate(): void;
 
 }
 
@@ -62,6 +63,79 @@ export class GeoJSONOverlay extends ImageOverlay {
 		frame?: Matrix4 | null,
 
 	} );
+
+}
+
+export interface StyledGeoJSONFeatureStyle {
+	// 通用样式。visible 为 false 时该 feature 不参与索引和绘制。
+	visible?: boolean;
+	zIndex?: number;
+	opacity?: number;
+
+	// 面样式。fillOpacity 会和 opacity 相乘。
+	fillStyle?: string | null;
+	fillOpacity?: number;
+
+	// 线样式。strokeOpacity 会和 opacity 相乘。
+	strokeStyle?: string | null;
+	strokeWidth?: number;
+	strokeOpacity?: number;
+	lineDash?: number[];
+	lineCap?: CanvasLineCap;
+	lineJoin?: CanvasLineJoin;
+
+	// 点样式。点样式未设置时会回退到 fillStyle / strokeStyle / strokeWidth。
+	pointRadius?: number;
+	pointOpacity?: number;
+	pointFillStyle?: string | null;
+	pointStrokeStyle?: string | null;
+	pointStrokeWidth?: number | null;
+}
+
+export interface StyledGeoJSONFeaturePatch {
+	geometry?: any;
+	properties?: Record<string, any>;
+	style?: StyledGeoJSONFeatureStyle;
+}
+
+export class StyledGeoJSONOverlay extends ImageOverlay {
+
+	constructor( options: {
+		geojson?: any,
+		url?: string,
+		resolution?: number,
+		defaultStyle?: StyledGeoJSONFeatureStyle,
+		pointRadius?: number,
+		strokeStyle?: string,
+		strokeWidth?: number,
+		fillStyle?: string,
+		color?: number | Color,
+		opacity?: number,
+		frame?: Matrix4 | null,
+		preprocessURL?: ( url: string ) => string | null;
+	} );
+
+	defaultStyle: StyledGeoJSONFeatureStyle;
+	geojson: any;
+
+	redraw(): void;
+	setGeoJSON( geojson: any, options?: { redraw?: boolean } ): void;
+	getFeatureById( id: string | number ): any | null;
+	syncFeature( feature: any, options?: { redraw?: boolean } ): any;
+	syncFeatureById( id: string | number, options?: { redraw?: boolean } ): any;
+	updateFeature(
+		feature: any,
+		patchOrUpdater: StyledGeoJSONFeaturePatch | ( ( feature: any ) => StyledGeoJSONFeaturePatch ),
+		options?: { redraw?: boolean },
+	): any;
+	updateFeatureById(
+		id: string | number,
+		patchOrUpdater: StyledGeoJSONFeaturePatch | ( ( feature: any ) => StyledGeoJSONFeaturePatch ),
+		options?: { redraw?: boolean },
+	): any;
+	updateFeatureStyleById( id: string | number, stylePatch: StyledGeoJSONFeatureStyle, options?: { redraw?: boolean, requestUpdate?: boolean } ): any;
+	updateFeatureStylesByIds( ids: Array<string | number>, stylePatch: StyledGeoJSONFeatureStyle, options?: { redraw?: boolean, requestUpdate?: boolean } ): any[];
+	updateFeatureGeometryById( id: string | number, geometry: any, options?: { redraw?: boolean } ): any;
 
 }
 

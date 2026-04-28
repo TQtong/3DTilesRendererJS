@@ -10,6 +10,7 @@ import { GeometryClipper } from '../utilities/GeometryClipper.js';
 import { WMTSImageSource } from './sources/WMTSImageSource.js';
 import { MemoryUtils } from 'um-3d-tiles-renderer/three';
 import { GeoJSONImageSource } from './sources/GeoJSONImageSource.js';
+import { StyledGeoJSONImageSource } from './sources/StyledGeoJSONImageSource.js';
 import { WMSImageSource } from './sources/WMSImageSource.js';
 import { TiledRegionImageSource } from './sources/RegionImageSource.js';
 import { TiledTextureComposer } from './overlays/TiledTextureComposer.js';
@@ -792,6 +793,7 @@ export class ImageOverlayPlugin {
 			controller: controller,
 			frame: overlay.frame ? overlay.frame.clone() : null,
 		} );
+		overlay._setNeedsUpdateCallback( () => this._refreshOverlay( overlay ) );
 
 		if ( tiles !== null ) {
 
@@ -850,6 +852,7 @@ export class ImageOverlayPlugin {
 
 			tileInfo.clear();
 			overlayInfo.delete( overlay );
+			overlay._setNeedsUpdateCallback( null );
 			controller.abort();
 
 			// Remove any items that reference the overlay being disposed
@@ -872,6 +875,56 @@ export class ImageOverlayPlugin {
 			this._markNeedsUpdate();
 
 		}
+
+	}
+
+	_refreshOverlay( overlay ) {
+
+		const { overlayInfo, processedTiles, pendingTiles } = this;
+		const info = overlayInfo.get( overlay );
+		if ( ! info ) {
+
+			return;
+
+		}
+
+		const refreshTile = async ( scene, tile ) => {
+
+			if ( ! info.tileInfo.has( tile ) ) {
+
+				this._initTileOverlayInfo( tile, overlay );
+
+			}
+
+			await this._initTileSceneOverlayInfo( scene, tile, overlay );
+			this._updateLayers( tile );
+
+		};
+
+		const promises = [];
+		processedTiles.forEach( tile => {
+
+			const scene = tile.engineData && tile.engineData.scene;
+			if ( scene ) {
+
+				promises.push( refreshTile( scene, tile ) );
+
+			}
+
+		} );
+
+		pendingTiles.forEach( ( scene, tile ) => {
+
+			promises.push( refreshTile( scene, tile ) );
+
+		} );
+
+		Promise.all( promises ).then( () => {
+
+			this.resetVirtualChildren( ! this.enableTileSplitting );
+			this._markNeedsUpdate();
+
+		} );
 
 	}
 
@@ -1280,6 +1333,7 @@ class ImageOverlay {
 		this.alphaInvert = alphaInvert;
 
 		this._whenReady = null;
+		this._needsUpdateCallback = null;
 		this.isReady = false;
 		this.isInitialized = false;
 
@@ -1346,6 +1400,22 @@ class ImageOverlay {
 	shouldSplit( range, tile ) {
 
 		return false;
+
+	}
+
+	_setNeedsUpdateCallback( callback ) {
+
+		this._needsUpdateCallback = callback;
+
+	}
+
+	requestUpdate() {
+
+		if ( this._needsUpdateCallback ) {
+
+			this._needsUpdateCallback();
+
+		}
 
 	}
 
@@ -1626,6 +1696,188 @@ export class GeoJSONOverlay extends ImageOverlay {
 	redraw() {
 
 		this.imageSource.redraw();
+
+	}
+
+}
+
+export class StyledGeoJSONOverlay extends ImageOverlay {
+
+	get projection() {
+
+		return this.imageSource.projection;
+
+	}
+
+	get aspectRatio() {
+
+		return 2;
+
+	}
+
+	get defaultStyle() {
+
+		return this.imageSource.defaultStyle;
+
+	}
+
+	set defaultStyle( v ) {
+
+		this.imageSource.defaultStyle = this.imageSource._resolveStyle( this.imageSource.defaultStyle, v );
+		this.imageSource.redraw();
+		this.requestUpdate();
+
+	}
+
+	get geojson() {
+
+		return this.imageSource.geojson;
+
+	}
+
+	set geojson( v ) {
+
+		this.imageSource.setGeoJSON( v );
+		this.requestUpdate();
+
+	}
+
+	constructor( options = {} ) {
+
+		super( options );
+		this.imageSource = new StyledGeoJSONImageSource( options );
+
+	}
+
+	_init() {
+
+		// GeoJSON 可以通过 url 加载。这里把 overlay 的 fetch 管线传给 source,
+		// 让 preprocessURL 和后续插件中的下载队列仍然可以生效。
+		this.imageSource.fetchData = ( ...args ) => this.fetch( ...args );
+		return this.imageSource.init();
+
+	}
+
+	hasContent( range ) {
+
+		return this.imageSource.hasContent( ...range );
+
+	}
+
+	getTexture( range ) {
+
+		return this.imageSource.get( ...range );
+
+	}
+
+	lockTexture( range ) {
+
+		return this.imageSource.lock( ...range );
+
+	}
+
+	releaseTexture( range ) {
+
+		this.imageSource.release( ...range );
+
+	}
+
+	setResolution( resolution ) {
+
+		this.imageSource.resolution = resolution;
+
+	}
+
+	shouldSplit( range, tile ) {
+
+		return true;
+
+	}
+
+	redraw() {
+
+		this.imageSource.redraw();
+		this.requestUpdate();
+
+	}
+
+	// 以下方法是 source 的便捷代理。业务层通常只持有 overlay,
+	// 所以把单 feature 同步和更新能力也暴露在 overlay 上。
+	getFeatureById( id ) {
+
+		return this.imageSource.getFeatureById( id );
+
+	}
+
+	setGeoJSON( geojson, options ) {
+
+		const result = this.imageSource.setGeoJSON( geojson, options );
+		this.requestUpdate();
+		return result;
+
+	}
+
+	syncFeature( feature, options ) {
+
+		const result = this.imageSource.syncFeature( feature, options );
+		this.requestUpdate();
+		return result;
+
+	}
+
+	syncFeatureById( id, options ) {
+
+		const result = this.imageSource.syncFeatureById( id, options );
+		this.requestUpdate();
+		return result;
+
+	}
+
+	updateFeature( feature, patchOrUpdater, options ) {
+
+		const result = this.imageSource.updateFeature( feature, patchOrUpdater, options );
+		this.requestUpdate();
+		return result;
+
+	}
+
+	updateFeatureById( id, patchOrUpdater, options ) {
+
+		const result = this.imageSource.updateFeatureById( id, patchOrUpdater, options );
+		this.requestUpdate();
+		return result;
+
+	}
+
+	updateFeatureStyleById( id, stylePatch, options ) {
+
+		const result = this.imageSource.updateFeatureStyleById( id, stylePatch, options );
+		if ( options && options.requestUpdate ) {
+
+			this.requestUpdate();
+
+		}
+		return result;
+
+	}
+
+	updateFeatureStylesByIds( ids, stylePatch, options ) {
+
+		const result = this.imageSource.updateFeatureStylesByIds( ids, stylePatch, options );
+		if ( options && options.requestUpdate ) {
+
+			this.requestUpdate();
+
+		}
+		return result;
+
+	}
+
+	updateFeatureGeometryById( id, geometry, options ) {
+
+		const result = this.imageSource.updateFeatureGeometryById( id, geometry, options );
+		this.requestUpdate();
+		return result;
 
 	}
 

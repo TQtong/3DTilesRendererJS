@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+		<meta charset="utf-8"/>
+
+		<title>Styled GeoJSON Overlay</title>
+		<link rel="stylesheet" href="../../styles.css">
+		<!-- 本页面直接指向源码目录, 方便在浏览器中手动验证 StyledGeoJSONOverlay。 -->
+		<script type="importmap">
+		{
+			"imports": {
+				"three": "../../../node_modules/three/build/three.module.js",
+				"three/": "../../../node_modules/three/",
+				"rbush": "../../../node_modules/rbush/index.js",
+				"quickselect": "../../../node_modules/quickselect/index.js",
+				"geojson-merge-ts": "../../../node_modules/geojson-merge-ts/dist/index.js",
+				"text-to-canvas": "../../../node_modules/text-to-canvas/dist/text-to-canvas.esm.min.js",
+				"um-3d-tiles-renderer": "../../../src/index.js",
+				"um-3d-tiles-renderer/core/plugins": "../../../src/core/plugins/index.js",
+				"um-3d-tiles-renderer/core": "../../../src/core/renderer/index.js",
+				"um-3d-tiles-renderer/three/plugins": "../../../src/three/plugins/index.js",
+				"um-3d-tiles-renderer/three": "../../../src/three/renderer/index.js",
+				"um-3d-tiles-renderer/plugins": "../../../src/plugins.js"
+			}
+		}
+		</script>
+	</head>
+	<body>
+		<div id="info"></div>
+		<script src="./styledGeoJSONOverlay.js" type="module"></script>
+	</body>
+</html>

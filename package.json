@@ -167,6 +167,8 @@
     }
   },
   "dependencies": {
+    "geojson-merge-ts": "^1.0.0",
+    "rbush": "^4.0.1",
     "text-to-canvas": "^4.0.0"
   }
 }
