@@ -94,6 +94,11 @@ export class PlotEngine {
 		this._tick = () => {
 
 			this.update();
+			// 每帧都给 TiledPipe 一次同步机会——主要为了 meshOverlay 模式
+			// 把 _meshGroup 的 matrix 重置为 plotEngine.group.matrixWorld^-1，
+			// 即便 update() 因为没有 invalidate 提前返回，meshOverlay 也不会因
+			// plotEngine.group 的动态变换而出现位置漂移
+			this.tiledPipe?.syncFrame?.();
 			if ( this._running ) this._rafHandle = this._requestAnimationFrame( this._tick );
 
 		};

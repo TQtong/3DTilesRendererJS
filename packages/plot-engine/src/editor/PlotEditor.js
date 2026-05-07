@@ -46,11 +46,11 @@ const _pickPlanePoint = new Vector3();
 const _pickWorldHit = new Vector3();
 const _pickLocalHit = new Vector3();
 const _pickInvMatrix = new Matrix4();
+const _pickFrameMatrix = new Matrix4();
+const _pickShapeCenter = new Vector3();
 const _editFrameMatrix = new Matrix4();
 const _editFrameLocalMatrix = new Matrix4();
 const _editFrameParentInverse = new Matrix4();
-const _editFrameScaleMatrix = new Matrix4();
-const _editFrameTranslateMatrix = new Matrix4();
 const _editFrameCenter = new Vector3();
 const _selectionFrameMatrix = new Matrix4();
 const _surfaceRay = new Raycaster();
@@ -390,18 +390,21 @@ export class PlotEditor {
 	_testShapePick( shape ) {
 
 		// 取出挂载点矩阵
-		const mountMatrix = this._resolveShapeWorldMatrix( shape, _editFrameMatrix );
+		const pickTarget = this._createShapePickTarget( shape );
+		if ( ! pickTarget ) return null;
+
+		const { mountMatrix, testShape } = pickTarget;
 		if ( ! mountMatrix ) return null;
 
 		// 计算 shape 的 z 高度（取 coordinates 里的 z 或 style 中的 altitude）
-		const altitude = this._getShapeAltitude( shape );
+		const altitude = this._getShapeAltitude( testShape );
 
 		// 平面法线 = mount frame 的局部 +Y 在世界中的方向
 		_pickPlaneNormal.set( 0, 1, 0 ).transformDirection( mountMatrix ).normalize();
 		// 平面经过点 = mount frame 的 (0, altitude, 0)
-		if ( this._getShapeCoordinateCenter( shape, _editFrameCenter ) ) {
+		if ( this._getShapeCoordinateCenter( testShape, _pickShapeCenter ) ) {
 
-			_pickPlanePoint.set( _editFrameCenter.x, altitude, _editFrameCenter.y );
+			_pickPlanePoint.set( _pickShapeCenter.x, altitude, _pickShapeCenter.y );
 
 		} else {
 
@@ -424,10 +427,63 @@ export class PlotEditor {
 		const sy = _pickLocalHit.z;
 
 		// 调用 kind 的精确测试
-		if ( ! this._isPointInsideShape( shape, sx, sy ) ) return null;
+		if ( ! this._isPointInsideShape( testShape, sx, sy ) ) return null;
 
 		const distance = _pickWorldHit.distanceTo( this._camera.position );
 		return { distance };
+
+	}
+
+	_createShapePickTarget( shape ) {
+
+		const projected = this._createProjectedPickTarget( shape );
+		if ( projected ) return projected;
+
+		const mountMatrix = this._resolveShapeWorldMatrix( shape, _pickFrameMatrix );
+		if ( ! mountMatrix ) return null;
+		return {
+			mountMatrix,
+			testShape: shape,
+		};
+
+	}
+
+	_createProjectedPickTarget( shape ) {
+
+		const mode = shape.attachment?.mode ?? 'world';
+		if ( mode !== 'surface' && mode !== 'tiles' ) return null;
+
+		const target = this._resolveTarget( shape );
+		if ( ! target || ! this._isCartographicTarget( target ) ) return null;
+		if ( ! this._getShapeCoordinateCenter( shape, _pickShapeCenter ) ) return null;
+
+		const mountMatrix = this._resolveProjectedWorldMatrix( shape, _pickFrameMatrix );
+		if ( ! mountMatrix ) return null;
+
+		const originLon = _pickShapeCenter.x;
+		const originLat = _pickShapeCenter.y;
+		const latRad = originLat * DEG2RAD;
+		const metersPerLon = Math.max(
+			Math.abs( Math.cos( latRad ) ) * METERS_PER_DEGREE_LATITUDE,
+			1e-6,
+		);
+		const metersPerLat = METERS_PER_DEGREE_LATITUDE;
+		const metersPerStyleUnit = Math.sqrt( metersPerLon * metersPerLat );
+		const toDisplayPoint = point => [
+			( Number( point[ 0 ] ) - originLon ) * metersPerLon,
+			( Number( point[ 1 ] ) - originLat ) * metersPerLat,
+			0,
+		];
+
+		return {
+			mountMatrix,
+			testShape: {
+				...shape,
+				coordinates: ( shape.coordinates || [] ).map( toDisplayPoint ),
+				style: scaleDisplayStyle( shape.style, metersPerStyleUnit ),
+				attachment: { mode: 'world' },
+			},
+		};
 
 	}
 
@@ -879,7 +935,7 @@ export class PlotEditor {
 		if ( ! target || ! this._isCartographicTarget( target ) ) return null;
 		if ( ! this._getShapeCoordinateCenter( shape, _editFrameCenter ) ) return null;
 
-		const frameMatrix = this._resolveProjectedFrameWorldMatrix( shape, _editFrameMatrix );
+		const frameMatrix = this._resolveProjectedWorldMatrix( shape, _editFrameMatrix );
 		if ( ! frameMatrix ) return null;
 
 		const frameGroup = this._updateTempFrameGroup( frameProperty, frameName, frameMatrix );
@@ -1153,18 +1209,20 @@ export class PlotEditor {
 		const lonRad = lonDeg * DEG2RAD;
 		const latRad = latDeg * DEG2RAD;
 
+		// 椭球本地 ENU frame，原点在 polygon 中心 (lon, lat, 0)
+		// X = 东向米、Z = 北向米、Y = 沿地表法线向上
 		ellipsoid.getObjectFrame( latRad, lonRad, 0, 0, 0, 0, out );
 		targetGroup.updateMatrixWorld?.( true );
 		out.premultiply( targetGroup.matrixWorld );
 
-		const metersPerLon = Math.max(
-			Math.abs( Math.cos( latRad ) ) * METERS_PER_DEGREE_LATITUDE,
-			1e-6,
-		);
-		_editFrameScaleMatrix.makeScale( metersPerLon, 1, METERS_PER_DEGREE_LATITUDE );
-		_editFrameTranslateMatrix.makeTranslation( - lonDeg, 0, - latDeg );
-		out.multiply( _editFrameScaleMatrix );
-		out.multiply( _editFrameTranslateMatrix );
+		// 注意：这里**不再**右乘 scale(metersPerLon, 1, metersPerLat) * translate(-lonDeg, 0, -latDeg)。
+		// 那个矩阵是给 cartographic 输入（lon, height, lat）用的——会先平移再按米/度
+		// 比例缩放，最终落到 ENU 米空间。但 PlotEditor 的 shapeToDisplayPoint 已经把
+		// shape 坐标显式转成"米东向 / 米北向"了，再乘那个 scale*translate 等于做了
+		// 二次转换，多边形顶点会落到上百万米外、屏幕上看就是整屏被多边形覆盖。
+		//
+		// 正确语义：本矩阵直接接收 ENU 米空间（与 shapeToDisplayPoint 输出一致），
+		// 通过 ellipsoidFrame * targetGroup 投回世界坐标。
 		return out;
 
 	}

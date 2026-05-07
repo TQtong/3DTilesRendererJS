@@ -10,11 +10,6 @@
 
 import { Group } from 'three';
 
-import {
-	createPrimitiveObject,
-	disposeObjectTree,
-} from '../pipes/primitiveFactory.js';
-
 import { HandleLayer } from './HandleLayer.js';
 import { getShapeEditAdapter } from './ShapeEditAdapters.js';
 
@@ -43,7 +38,6 @@ export class EditSession {
 
 		this._plotEngine = options.plotEngine;
 		this._shapeStore = options.plotEngine.shapeStore;
-		this._compilerRegistry = options.plotEngine.compilerRegistry;
 		this._shapeId = options.shapeId;
 		this._mountGroup = options.mountGroup;
 		this._shapeToDisplayPoint = typeof options.shapeToDisplayPoint === 'function'
@@ -81,18 +75,12 @@ export class EditSession {
 		this._sessionGroup.matrixAutoUpdate = true;
 		this._mountGroup.add( this._sessionGroup );
 
-		this._hotMesh = null;
-
 		this._handleLayer = new HandleLayer( {
 			sizeScale: Number( options.handleSizeScale ?? 1 ),
 		} );
 		this._sessionGroup.add( this._handleLayer.group );
 
 		this._dirty = true;
-
-		this._coldHiddenObjects = [];
-		this._hideColdRenderingForShape();
-		this._hideTiledRenderingForShape();
 
 		this.flushIfDirty();
 
@@ -152,7 +140,6 @@ export class EditSession {
 
 		if ( ! this._dirty ) return;
 		this._dirty = false;
-		this._rebuildHotMesh();
 		this._rebuildHandlesAndOutline();
 
 	}
@@ -176,71 +163,12 @@ export class EditSession {
 	}
 
 	refreshColdHiding() {
-
-		this._coldHiddenObjects = this._coldHiddenObjects.filter( entry => {
-
-			return entry.object && entry.object.parent != null;
-
-		} );
-
-		const tracked = new Set( this._coldHiddenObjects.map( entry => entry.object ) );
-		const candidates = [];
-
-		const visit = root => {
-
-			if ( ! root ) return;
-			root.traverse( object => {
-
-				if ( object.userData?.plotShapeId === this._shapeId &&
-					object.visible &&
-					! tracked.has( object ) ) {
-
-					candidates.push( object );
-
-				}
-
-			} );
-
-		};
-
-		visit( this._plotEngine.worldPipe?.group );
-		const surfacePipe = this._plotEngine.surfacePipe;
-		if ( surfacePipe?._groups ) {
-
-			for ( const group of surfacePipe._groups.values() ) visit( group );
-
-		}
-
-		for ( const object of candidates ) {
-
-			this._coldHiddenObjects.push( {
-				object,
-				originalVisible: object.visible,
-			} );
-			object.visible = false;
-
-		}
+		// Cold rendering now remains visible; the edit layer only displays
+		// outline and handles. Keep this method for existing callers.
 
 	}
 
 	dispose() {
-
-		for ( const entry of this._coldHiddenObjects ) {
-
-			if ( entry.object ) entry.object.visible = entry.originalVisible;
-
-		}
-
-		this._showTiledRenderingForShape();
-		this._coldHiddenObjects.length = 0;
-
-		if ( this._hotMesh ) {
-
-			this._sessionGroup.remove( this._hotMesh );
-			disposeObjectTree( this._hotMesh, { disposeMaterials: true } );
-			this._hotMesh = null;
-
-		}
 
 		this._handleLayer.dispose();
 		this._sessionGroup.removeFromParent();
@@ -264,47 +192,6 @@ export class EditSession {
 
 	}
 
-	_rebuildHotMesh() {
-
-		const displayShape = this._shapeToDisplayShape( this._workingShape );
-		const tempShape = {
-			...displayShape,
-			revision: ( this._workingShape.revision ?? 0 ) + 1,
-		};
-		let compiled = null;
-		try {
-
-			compiled = this._compilerRegistry.compile( tempShape );
-
-		} catch ( error ) {
-
-			console.warn( '[EditSession] compile failed during edit:', error );
-			return;
-
-		}
-
-		if ( ! compiled ) return;
-
-		const newMesh = createPrimitiveObject( compiled );
-		if ( ! newMesh ) return;
-
-		configureEditOverlayObject( newMesh );
-		newMesh.raycast = () => {};
-		newMesh.frustumCulled = false;
-		newMesh.renderOrder = 998;
-
-		if ( this._hotMesh ) {
-
-			this._sessionGroup.remove( this._hotMesh );
-			disposeObjectTree( this._hotMesh, { disposeMaterials: true } );
-
-		}
-
-		this._hotMesh = newMesh;
-		this._sessionGroup.add( this._hotMesh );
-
-	}
-
 	_rebuildHandlesAndOutline() {
 
 		const handles = this._adapter.getEditableHandles( this._workingShape ).map( handle => ( {
@@ -317,84 +204,9 @@ export class EditSession {
 
 	}
 
-	_hideColdRenderingForShape() {
-
-		const visit = root => {
-
-			if ( ! root ) return;
-			root.traverse( object => {
-
-				if ( object.userData?.plotShapeId === this._shapeId && object.visible ) {
-
-					this._coldHiddenObjects.push( {
-						object,
-						originalVisible: object.visible,
-					} );
-					object.visible = false;
-
-				}
-
-			} );
-
-		};
-
-		visit( this._plotEngine.worldPipe?.group );
-		const surfacePipe = this._plotEngine.surfacePipe;
-		if ( surfacePipe?._groups ) {
-
-			for ( const group of surfacePipe._groups.values() ) {
-
-				visit( group );
-
-			}
-
-		}
-
-	}
-
-	_hideTiledRenderingForShape() {
-
-		this._plotEngine.tiledPipe?.setShapeHidden?.( this._shapeId, true );
-
-	}
-
-	_showTiledRenderingForShape() {
-
-		this._plotEngine.tiledPipe?.setShapeHidden?.( this._shapeId, false );
-
-	}
-
 }
 
 // ── 辅助比较函数 ────────────────────────────────────────────
-
-function configureEditOverlayObject( object ) {
-
-	object.traverse?.( child => {
-
-		const material = child.material;
-		if ( Array.isArray( material ) ) {
-
-			for ( const entry of material ) configureEditOverlayMaterial( entry );
-
-		} else {
-
-			configureEditOverlayMaterial( material );
-
-		}
-
-	} );
-
-}
-
-function configureEditOverlayMaterial( material ) {
-
-	if ( ! material ) return;
-	material.depthTest = false;
-	material.depthWrite = false;
-	material.needsUpdate = true;
-
-}
 
 function coordinatesEqual( a, b ) {
 

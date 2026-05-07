@@ -54,55 +54,44 @@ const SOONSPACE_LON_DEG = 110.425983;
 const SOONSPACE_LAT_DEG = 32.993182;
 const SOONSPACE_LON = SOONSPACE_LON_DEG * MathUtils.DEG2RAD;
 const SOONSPACE_LAT = SOONSPACE_LAT_DEG * MathUtils.DEG2RAD;
-const DEFAULT_DEMO_PLOT_COUNT = 100;
-const DEMO_PLOT_BATCH_SIZE = 5000;
-const DEMO_PLOT_LON_STEP = 0.0012;
-const DEMO_PLOT_LAT_STEP = 0.0012;
-const DEMO_PLOT_SIZE = 0.00042;
-const DEMO_PLOT_STROKE_WIDTH = 0.00006;
+const TOUCH_GROUND_FRAME_LON_DEG = 110;
+const TOUCH_GROUND_FRAME_LAT_DEG = 26.2;
+const TOUCH_GROUND_FRAME_DISTANCE = 3600000;
+const TOUCH_GROUND_CIRCLE_RADIUS = 8000;
+const TOUCH_GROUND_RECT_WIDTH = 20000;
+const TOUCH_GROUND_RECT_HEIGHT = 20000;
+const TOUCH_GROUND_ARROW_WIDTH = 5000;
+const TOUCH_GROUND_ARROW_HEAD_LENGTH = 12000;
 const LOCAL_EDITOR_HANDLE_SIZE = 0.6;
-const LOCAL_SURFACE_BOARD_SPAN = 72;
 const CONDITIONAL_TILE_UPDATE_FRAMES = 45;
-const SOONSPACE_POLYGON_STYLE = {
-	fillColor: '#22d3ee',
-	strokeColor: '#ecfeff',
-	strokeWidth: 0,
-	opacity: 0.55,
-};
-const DEMO_WORLD_PLOT_TYPES = [
-	'point',
-	'line',
-	'polyline',
-	'polygon',
-	'rectangle',
-	'circle',
-	'sector',
-	'arrow',
+const DEMO_SHAPE_COUNT = 8;
+const TOUCH_GROUND_LINE_POINTS = [
+	[ 119.99552468061438, 29.98779678449977 ],
+	[ 119.99580048686205, 29.988238416209864 ],
+	[ 119.99534018250115, 29.988492694365185 ],
+	[ 119.99435743163077, 29.988454606644222 ],
+	[ 119.99414870282934, 29.988084796650025 ],
+	[ 119.9944385073686, 29.987605192923038 ],
+	[ 119.99489756955799, 29.98744160470172 ],
+	[ 119.99515575549049, 29.98734323911049 ],
 ];
-const DEMO_TILE_PLOT_TYPES = [
-	'point',
-	'polygon',
-	'rectangle',
-	'circle',
-	'sector',
-	'arrow',
+const TOUCH_GROUND_POLYGON_POINTS = [
+	[ 100.60, 22.60 ],
+	[ 100.70, 22.55 ],
+	[ 100.75, 22.65 ],
+	[ 100.68, 22.70 ],
+	[ 100.58, 22.67 ],
 ];
-const DEMO_SURFACE_PLOT_TYPES = [
-	'polygon',
-	'rectangle',
-	'circle',
-	'sector',
-	'arrow',
+const TOUCH_GROUND_RECTANGLE_POINTS = [
+	[ 119.98958614828571, 29.981249367417227 ],
+	[ 119.98524036576107, 29.981153019385363 ],
+	[ 119.99513688269689, 29.984687707618647 ],
+	[ 119.99948281910438, 29.98478405905903 ],
 ];
-const DEMO_PLOT_COLORS = [
-	'#22d3ee',
-	'#f97316',
-	'#a78bfa',
-	'#84cc16',
-	'#f43f5e',
-	'#38bdf8',
-	'#facc15',
-	'#fb7185',
+const TOUCH_GROUND_ARROW_POINTS = [
+	[ 100.50, 22.70 ],
+	[ 100.60, 22.78 ],
+	[ 100.75, 22.60 ],
 ];
 const _beijingFrame = new Matrix4();
 const _globeSceneFrame = new Matrix4().makeRotationX( - Math.PI / 2 );
@@ -115,8 +104,6 @@ const _frameUp = new Vector3();
 const _frameRight = new Vector3();
 const _tileBoundsPoint = new Vector3();
 const _frameQuaternion = new Quaternion();
-const _moveRight = new Vector3();
-const _moveForward = new Vector3();
 const _tilesBounds = new Box3();
 const _loadedSceneBounds = new Box3();
 const _tilesCenter = new Vector3();
@@ -126,12 +113,10 @@ const _loadedSceneSize = new Vector3();
 const _tileCartographic = {};
 const _cartographicPosition = new Vector3();
 const noopRaycast = () => {};
+
 const _lastConditionalUpdateCameraMatrix = new Matrix4();
 
 let localTargetPlacementState = 'auto-fallback';
-let demoGenerationHandle = null;
-let demoGenerationToken = 0;
-let demoGenerationProgress = null;
 let conditionalUpdateCameraInitialized = false;
 let terrainConditionalUpdateFrames = CONDITIONAL_TILE_UPDATE_FRAMES;
 let modelConditionalUpdateFrames = CONDITIONAL_TILE_UPDATE_FRAMES;
@@ -145,18 +130,16 @@ const params = {
 	showSoonModel: true,
 	terrainVisible: true,
 	soonModelVisible: true,
-	localOpacity: 0.75,
+	localOpacity: 1,
 	worldHeight: 300,
-	demoPlotCount: DEFAULT_DEMO_PLOT_COUNT,
-	demoMode: 'single',
-	targetMode: 'world',
+	targetMode: 'surface',
 	reloadTerrain: reinstantiateTiles,
 	reloadSoonModel: reinstantiateModelTiles,
 	focusLocalBoard: frameLocalTarget,
 	focusTerrain: frameTerrain,
 	focusSoonModel: frameSoonModel,
 	resetShapes,
-	randomizeLocal: randomizeLocalShapes,
+	editorBeginEdit: () => beginEditSelectedShape(),
 	editorEndEdit: () => plotEditor?.endEdit(),
 	editorCancelEdit: () => plotEditor?.cancelEdit(),
 	editorDeselect: () => plotEditor?.deselect(),
@@ -165,9 +148,78 @@ const params = {
 	editorStatus: 'idle',
 };
 
-// 单 polygon 演示模式下，记录由 addSingleEditDemoShape 创建的 shape id，
-// 便于"高度滑块"直接更新该 shape 而无需重新创建
-let _singleDemoShapeId = null;
+const shapeIds = {
+	pointId: null,
+	lineId: null,
+	polylineId: null,
+	polygonId: null,
+	rectId: null,
+	sectorId: null,
+	circleId: null,
+	arrowId: null,
+};
+
+const S = {
+	pointStyle: 'circle',
+	pointSize: 2000,
+	pointFillColor: '#3B82F6',
+	pointFillOpacity: 80,
+	pointStrokeColor: '#1D4ED8',
+	pointStrokeWidth: 2,
+	pointStrokeOpacity: 100,
+	pointVisible: true,
+
+	lineStrokeStyle: 'solid',
+	lineStrokeColor: '#ff00ff',
+	lineStrokeWidth: 8,
+	lineStrokeOpacity: 90,
+	lineVisible: true,
+
+	polylineStrokeStyle: 'solid',
+	polylineStrokeColor: '#ff00ff',
+	polylineStrokeWidth: 8,
+	polylineStrokeOpacity: 90,
+	polylineVisible: true,
+
+	polyFillColor: '#3B82F6',
+	polyFillOpacity: 40,
+	polyStrokeColor: '#1D4ED8',
+	polyStrokeWidth: 4,
+	polyStrokeOpacity: 100,
+	polyVisible: true,
+
+	rectFillColor: '#22c55e',
+	rectFillOpacity: 60,
+	rectStrokeColor: '#15803d',
+	rectStrokeWidth: 2,
+	rectStrokeOpacity: 100,
+	rectVisible: true,
+
+	sectorFillColor: '#f59e0b',
+	sectorFillOpacity: 50,
+	sectorStrokeColor: '#b45309',
+	sectorStrokeWidth: 3,
+	sectorStrokeOpacity: 100,
+	sectorRadius: 8000,
+	sectorStartAngle: 0,
+	sectorAngle: 90,
+	sectorVisible: true,
+
+	circleFillColor: '#ef4444',
+	circleFillOpacity: 50,
+	circleStrokeColor: '#ffff00',
+	circleStrokeWidth: 6,
+	circleStrokeOpacity: 100,
+	circleVisible: true,
+
+	arrowType: 'fine',
+	arrowFillColor: '#3B82F6',
+	arrowFillOpacity: 60,
+	arrowStrokeColor: '#1D4ED8',
+	arrowStrokeWidth: 2,
+	arrowStrokeOpacity: 100,
+	arrowVisible: true,
+};
 
 const _clickState = {
 	startX: 0,
@@ -193,6 +245,11 @@ function init() {
 	renderer = new WebGLRenderer( {
 		antialias: true,
 		logarithmicDepthBuffer: true,
+		// stencil 缂傛挸鍟块弰?PlotEngine TiledPipe meshOverlay 濡€崇础閿涘湑esium 妞嬪孩鐗搁崷鏉胯埌閸掑棛琚敍?
+		// 閻ㄥ嫮鈥栭幀褑顩﹀Ч鍌椻偓鏂衡偓鏃€鐥呴張?stencil 缂傛挸鍟块敍瀹籬adow volume 娴兼俺顫﹂弫缈犵秼缂佹ê鍩楁稉鍝勫讲鐟欎焦鐓存担鎾扁偓?
+		// Three.js WebGLRenderer 鐎?`stencil` 閻ㄥ嫰绮拋銈呪偓鐓庢躬娑撳秴鎮撻悧鍫熸拱闁插本婀侀崣妯哄閿?
+		// 鏉╂瑩鍣烽弰鎯х础閹垫挸绱戦柆鍨帳娓氭繆绂嗘妯款吇閵?
+		stencil: true,
 	} );
 	renderer.setClearColor( 0x151c1f );
 	document.body.appendChild( renderer.domElement );
@@ -304,11 +361,7 @@ function shouldUpdateExternalTiles( visible, forcedFrames, cameraChanged ) {
 
 function setupPlotEngine() {
 
-	plotEngine = new PlotEngine( {
-		tiledPipe: {
-			rasterize: false,
-		},
-	} );
+	plotEngine = new PlotEngine();
 	scene.add( plotEngine.group );
 	plotEngine.setMode( params.targetMode );
 	plotEngine.start();
@@ -325,10 +378,10 @@ function setupPlotEditor() {
 		plotEngine,
 		camera,
 		renderer,
-		// 默认手柄大小（局部坐标单位）。在不同 attach 模式下需要按尺度调整：
-		//  - local board (尺度 ~80m)：~0.6
-		//  - world (lon/lat 弧度尺度)：~0.00015
-		// 这里给一个保守值，由调用方在 beginEdit 后通过 setSizeScale 覆盖
+		// 姒涙顓婚幍瀣労婢堆冪毈閿涘牆鐪柈銊ユ綏閺嶅洤宕熸担宥忕礆閵嗗倸婀稉宥呮倱 attach 濡€崇础娑撳娓剁憰浣瑰瘻鐏忓搫瀹崇拫鍐╂殻閿?
+		//  - local board (鐏忓搫瀹?~80m)閿涙畧0.6
+		//  - world (lon/lat 瀵冨鐏忓搫瀹?閿涙畧0.00015
+		// 鏉╂瑩鍣风紒娆庣娑擃亙绻氱€瑰牆鈧》绱濋悽杈殶閻劍鏌熼崷?beginEdit 閸氬酣鈧俺绻?setSizeScale 鐟曞棛娲?
 		handleSizeScale: 0.6,
 	} );
 
@@ -342,10 +395,10 @@ function setupPlotEditor() {
 
 }
 
-// ── 点击拾取：把"点击空白处的 shape"翻译为"进入该 shape 的编辑会话" ──
+// 閳光偓閳光偓 閻愮懓鍤幏鎯у絿閿涙碍濡?閻愮懓鍤粚铏规婢跺嫮娈?shape"缂堟槒鐦ф稉?鏉╂稑鍙嗙拠?shape 閻ㄥ嫮绱潏鎴滅窗鐠? 閳光偓閳光偓
 //
-// 仅当点击是真正的"短按"（按下与抬起位置接近、间隔短）才视为 click，
-// 否则视作 GlobeControls 自己的拖拽，不打扰相机操作。
+// 娴犲懎缍嬮悙鐟板毊閺勵垳婀″锝囨畱"閻厽瀵?閿涘牊瀵滄稉瀣╃瑢閹额剝鎹ｆ担宥囩枂閹恒儴绻庨妴渚€妫块梾鏃傜叚閿涘澧犵憴鍡曡礋 click閿?
+// 閸氾箑鍨憴鍡曠稊 GlobeControls 閼奉亜绻侀惃鍕珛閹锋枻绱濇稉宥嗗ⅵ閹垫壆娴夐張鐑樻惙娴ｆ嚎鈧?
 function attachShapePickListener() {
 
 	const dom = renderer.domElement;
@@ -376,26 +429,36 @@ function onShapePickPointerUp( event ) {
 	if ( Math.abs( dx ) > CLICK_MAX_MOVE_PX || Math.abs( dy ) > CLICK_MAX_MOVE_PX ) return;
 	if ( dt > CLICK_MAX_MS ) return;
 
-	// 编辑期间：让 DragController 自己处理 handle 命中；这里只在"无 handle 命中"
-	// 的情况下做 shape pick。最容易的判定是：plotEditor 的 isEditing 状态没变，
-	// 但其实更可靠的方式是直接尝试 pick——如果 hit 落在另一个 shape 上，则切换。
+	// 缂傛牞绶張鐔兼？閿涙俺顔€ DragController 閼奉亜绻佹径鍕倞 handle 閸涙垝鑵戦敍娑滅箹闁插苯褰ч崷?閺?handle 閸涙垝鑵?
+	// 閻ㄥ嫭鍎忛崘鍏哥瑓閸?shape pick閵嗗倹娓剁€硅妲楅惃鍕灲鐎规碍妲搁敍姝眑otEditor 閻?isEditing 閻樿埖鈧焦鐥呴崣姗堢礉
+	// 娴ｅ棗鍙剧€圭偞娲块崣顖炴浆閻ㄥ嫭鏌熷蹇旀Ц閻╁瓨甯寸亸婵婄槸 pick閳ユ柡鈧柨顩ч弸?hit 閽€钘夋躬閸欙缚绔存稉?shape 娑撳绱濋崚娆忓瀼閹诡潿鈧?
 	if ( ! plotEditor ) return;
 	const shapeId = plotEditor.pickShapeAt( event.clientX, event.clientY );
 	if ( shapeId == null ) return;
 	if ( plotEditor.editingShapeId === shapeId ) return;
 
-	plotEditor.beginEdit( shapeId );
+	plotEditor.select( shapeId );
+	refreshEditorGui();
+
+}
+
+function beginEditSelectedShape( shapeId = plotEditor?.selectedShapeId ) {
+
+	if ( ! plotEditor || shapeId == null ) return false;
+	const ok = plotEditor.beginEdit( shapeId );
+	if ( ! ok ) return false;
 	const shape = plotEngine.shapeStore.get( shapeId );
 	if ( shape ) {
 
-		// 不同 attachment 的坐标尺度差异巨大，按尺度选择手柄大小：
-		//  - world (lon/lat 弧度)：~0.00015
-		//  - surface 上 local-board / 米尺度：~0.6
+		// 娑撳秴鎮?attachment 閻ㄥ嫬娼楅弽鍥ф槀鎼达箑妯婂鍌氭硶婢堆嶇礉閹稿鏄傛惔锕傗偓澶嬪閹靛鐒烘径褍鐨敍?
+		//  - world (lon/lat 瀵冨)閿涙畧0.00015
+		//  - surface 娑?local-board / 缁啿鏄傛惔锔肩窗~0.6
 		plotEditor._session?.handleLayer?.setSizeScale?.( getEditorHandleSizeScale( shape ) );
 
 	}
 
 	refreshEditorGui();
+	return true;
 
 }
 
@@ -732,7 +795,12 @@ function frameCartographicLocation( lat, lon, height, distance ) {
 
 function frameTerrain() {
 
-	frameCartographicLocation( SOONSPACE_LAT, SOONSPACE_LON, DEFAULT_SHAPE_HEIGHT + 2000, 12000 );
+	frameCartographicLocation(
+		TOUCH_GROUND_FRAME_LAT_DEG * MathUtils.DEG2RAD,
+		TOUCH_GROUND_FRAME_LON_DEG * MathUtils.DEG2RAD,
+		DEFAULT_SHAPE_HEIGHT + 2000,
+		TOUCH_GROUND_FRAME_DISTANCE,
+	);
 
 }
 
@@ -1007,156 +1075,498 @@ function frameLocalTarget() {
 function resetShapes( options = {} ) {
 
 	const frameCamera = options.frameCamera !== false;
-	clearDemoShapes();
-
-	// "single" 模式：默认值，仅渲染一个大多边形，便于演示编辑
-	// "random" 模式：保留原有的随机多 shape 测试场景
-	const demoMode = params.demoMode ?? 'single';
-
-	if ( demoMode === 'single' ) {
-
-		addSingleEditDemoShape( frameCamera );
-		return;
-
-	}
-
-	if ( params.targetMode === 'tiles' ) {
-
-		addModelDemoShapes( frameCamera );
-
-	} else if ( params.targetMode === 'world' ) {
-
-		addWorldDemoShapes( frameCamera );
-
-	} else {
-
-		addSurfaceDemoShapes( frameCamera );
-
-	}
+	clearFixedDemoShapes();
+	reAddAllDemoShapes( false );
+	finalizeFixedDemoShapes( frameCamera );
+	return;
 
 }
 
-/**
- * 单一编辑演示：在 SoonCPS 中心附近放一个面积较大的多边形，并按当前
- * targetMode 决定它的 attachment：
- *
- *   - world  → addWorldShape：cartographic→world 转换，多边形悬浮在 SoonCPS
- *              世界坐标系上方（worldHeight 米），编辑器立即进入编辑会话
- *   - surface → addSurfaceShape：保留 cartographic 坐标，attachment 为 surface
- *              的 terrain target——多边形会"贴地"在 Cesium 地形上
- *   - tiles   → addModelShape：附着在 SoonCPS 模型瓦片上
- *
- * 高度统一来自 params.worldHeight（与"World height"滑块同源），用户拖动
- * 滑块会实时改变 demo polygon 的高度（surface/tiles 模式下也有效，但视
- * attachment 实现可能被覆盖为地表跟随）。
- *
- * @param {boolean} frameCamera 是否聚焦相机
- */
-function addSingleEditDemoShape( frameCamera ) {
 
-	const cartoPolygon = buildSingleDemoCartographicPolygon();
+function getDemoShapeEntries() {
 
-	let result;
-	if ( params.targetMode === 'tiles' ) {
+	return [
+		{ label: 'Point', idKey: 'pointId', addFn: addDemoPoint, applyFn: applyPoint },
+		{ label: 'Line', idKey: 'lineId', addFn: addDemoLine, applyFn: applyLine },
+		{ label: 'Polyline', idKey: 'polylineId', addFn: addDemoPolyline, applyFn: applyPolyline },
+		{ label: 'Polygon', idKey: 'polygonId', addFn: addDemoPolygon, applyFn: applyPoly },
+		{ label: 'Rectangle', idKey: 'rectId', addFn: addDemoRectangle, applyFn: applyRect },
+		{ label: 'Sector', idKey: 'sectorId', addFn: addDemoSector, applyFn: applySector },
+		{ label: 'Circle', idKey: 'circleId', addFn: addDemoCircle, applyFn: applyCircle },
+		{ label: 'Arrow', idKey: 'arrowId', addFn: addDemoArrow, applyFn: applyArrow },
+	];
 
-		result = addModelShape( cartoPolygon );
+}
 
-	} else if ( params.targetMode === 'surface' ) {
+function reAddAllDemoShapes( shouldInvalidate = true ) {
 
-		result = addSurfaceShape( cartoPolygon );
+	for ( const entry of getDemoShapeEntries() ) {
 
-	} else {
-
-		// world 模式（默认）：cartographic → world frame meters，attachment.mode = 'world'
-		result = addWorldShape( cartographicShapeToWorldShape( cartoPolygon ) );
+		if ( shapeIds[ entry.idKey ] != null ) continue;
+		shapeIds[ entry.idKey ] = entry.addFn( shouldInvalidate );
 
 	}
 
-	_singleDemoShapeId = result?.id ?? null;
+	if ( shouldInvalidate ) finalizeFixedDemoShapes( false );
+
+}
+
+function clearFixedDemoShapes() {
+
+	if ( plotEditor?.isEditing ) plotEditor.cancelEdit();
+	plotEditor?.deselect?.();
+	plotEngine.stop();
+	plotEngine.clearShapes();
+	worldShapeIds.length = 0;
+	localShapeIds.length = 0;
+	terrainShapeIds.length = 0;
+	modelShapeIds.length = 0;
+	for ( const key of Object.keys( shapeIds ) ) shapeIds[ key ] = null;
+	refreshEditorGui();
+
+}
+
+function finalizeFixedDemoShapes( frameCamera ) {
+
 	plotEngine.invalidate();
 	plotEngine.update();
 	plotEngine.start();
-	demoGenerationProgress = null;
+	requestConditionalTilesUpdates();
 
-	// Begin editing in every target mode; PlotEditor resolves the correct edit frame.
-	if ( _singleDemoShapeId != null && plotEditor ) {
-
-		plotEditor.beginEdit( _singleDemoShapeId );
-		const shape = plotEngine.shapeStore.get( _singleDemoShapeId );
-		if ( shape ) plotEditor._session?.handleLayer?.setSizeScale?.( getEditorHandleSizeScale( shape ) );
-
-	}
-
-	if ( frameCamera ) frameSoonModel();
+	if ( ! frameCamera ) return;
+	if ( params.targetMode === 'world' ) frameLocalTarget();
+	else frameTerrain();
 
 }
 
-/**
- * 构造 single 模式的 cartographic 多边形（lon/lat 度数 + 高度米）。
- * 多边形位于 SoonCPS 中心，宽约 50–70 米，呈不规则六边形，便于直观看到
- * 顶点 / 中点 / 中心控制点。
- */
-function buildSingleDemoCartographicPolygon() {
+function addDemoShape( sourceShape, shouldInvalidate = true ) {
 
-	const altitude = Number( params.worldHeight ?? 300 ) || 0;
-	const lon = SOONSPACE_LON_DEG;
-	const lat = SOONSPACE_LAT_DEG;
-	// 0.0005 度 ≈ 55m 经度（在 ~33°N 处约 92km/deg），0.0005 度 ≈ 55m 纬度
-	const r = 0.0005;
+	const shape = prepareDemoShapeForTarget( sourceShape );
+	let result;
+	if ( params.targetMode === 'world' ) {
+
+		result = addWorldShape( demoCartographicShapeToWorldShape( shape ), params.worldHeight, shouldInvalidate );
+
+	} else if ( params.targetMode === 'tiles' ) {
+
+		result = addTerrainShape( shape, shouldInvalidate );
+
+	} else {
+
+		result = addSurfaceShape( shape, shouldInvalidate );
+
+	}
+
+	return result?.id ?? null;
+
+}
+
+function prepareDemoShapeForTarget( sourceShape ) {
+
+	const shape = {
+		...sourceShape,
+		coordinates: cloneCoordinates( sourceShape.coordinates || [] ),
+		style: { ...( sourceShape.style || {} ) },
+		userData: { ...( sourceShape.userData || {} ) },
+	};
+
+	if ( params.targetMode !== 'world' ) shape.style = metricStyleToCartographicStyle( shape );
+	return shape;
+
+}
+
+function updateDemoShapeStyle( idKey, sourceShape ) {
+
+	const id = shapeIds[ idKey ];
+	if ( id == null || ! plotEngine.shapeStore.has( id ) ) return;
+	const nextShape = prepareDemoShapeForTarget( sourceShape );
+	plotEngine.updateShape( id, {
+		style: nextShape.style,
+	} );
+	updateEditingSessionAfterExternalChange( id );
+	requestConditionalTilesUpdates();
+
+}
+
+function removeDemoShape( idKey ) {
+
+	const id = shapeIds[ idKey ];
+	if ( id == null ) return;
+	if ( plotEditor?.editingShapeId === id ) plotEditor.cancelEdit();
+	if ( plotEditor?.selectedShapeId === id ) plotEditor.deselect();
+	plotEngine.removeShape( id );
+	removeShapeIdFromLists( id );
+	shapeIds[ idKey ] = null;
+	plotEngine.update();
+	requestConditionalTilesUpdates();
+	refreshEditorGui();
+
+}
+
+function removeShapeIdFromLists( id ) {
+
+	for ( const list of [ worldShapeIds, localShapeIds, terrainShapeIds, modelShapeIds ] ) {
+
+		const index = list.indexOf( id );
+		if ( index !== - 1 ) list.splice( index, 1 );
+
+	}
+
+}
+
+function updateEditingSessionAfterExternalChange( shapeId ) {
+
+	if ( plotEditor?.editingShapeId === shapeId ) plotEditor._refreshSessionAfterExternalChange?.();
+
+}
+
+function cloneCoordinates( coordinates ) {
+
+	return coordinates.map( point => [ ...point ] );
+
+}
+
+function cloneSourcePoints( points ) {
+
+	return points.map( point => [ point[ 0 ], point[ 1 ] ] );
+
+}
+
+function getRectangleCenter() {
+
+	let lon = 0;
+	let lat = 0;
+	for ( const point of TOUCH_GROUND_RECTANGLE_POINTS ) {
+
+		lon += point[ 0 ];
+		lat += point[ 1 ];
+
+	}
+
+	return [
+		lon / TOUCH_GROUND_RECTANGLE_POINTS.length,
+		lat / TOUCH_GROUND_RECTANGLE_POINTS.length,
+	];
+
+}
+
+function percent( value ) {
+
+	return MathUtils.clamp( Number( value ) || 0, 0, 100 ) / 100;
+
+}
+
+function visibleOpacity( visible, opacityPercent ) {
+
+	return visible ? MathUtils.clamp( params.localOpacity * percent( opacityPercent ), 0, 1 ) : 0;
+
+}
+
+function fillStrokeStyle( prefix, visible, primaryOpacityPercent ) {
+
+	const visibility = visible ? params.localOpacity : 0;
 	return {
+		units: 'meters',
+		fillColor: S[ `${ prefix }FillColor` ],
+		fillOpacity: visibility * percent( S[ `${ prefix }FillOpacity` ] ),
+		strokeColor: S[ `${ prefix }StrokeColor` ],
+		strokeWidth: S[ `${ prefix }StrokeWidth` ],
+		strokeOpacity: visibility * percent( S[ `${ prefix }StrokeOpacity` ] ),
+		opacity: visibleOpacity( visible, primaryOpacityPercent ),
+	};
+
+}
+
+function lineStyle( prefix, visible ) {
+
+	const strokeWidth = S[ `${ prefix }StrokeWidth` ];
+	const strokeOpacity = S[ `${ prefix }StrokeOpacity` ];
+	return {
+		units: 'meters',
+		fillColor: '#000000',
+		strokeStyle: S[ `${ prefix }StrokeStyle` ],
+		strokeColor: S[ `${ prefix }StrokeColor` ],
+		strokeWidth,
+		strokeOpacity: visible ? params.localOpacity * percent( strokeOpacity ) : 0,
+		boundsPadding: strokeWidth * 0.5,
+		opacity: visibleOpacity( visible, strokeOpacity ),
+	};
+
+}
+
+function buildPointStyle() {
+
+	return {
+		...fillStrokeStyle( 'point', S.pointVisible, S.pointFillOpacity ),
+		pointStyle: S.pointStyle,
+		size: S.pointSize,
+	};
+
+}
+
+function buildPolyStyle() {
+
+	return fillStrokeStyle( 'poly', S.polyVisible, S.polyFillOpacity );
+
+}
+
+function buildRectStyle() {
+
+	return {
+		...fillStrokeStyle( 'rect', S.rectVisible, S.rectFillOpacity ),
+		width: TOUCH_GROUND_RECT_WIDTH,
+		height: TOUCH_GROUND_RECT_HEIGHT,
+	};
+
+}
+
+function buildSectorStyle() {
+
+	return {
+		...fillStrokeStyle( 'sector', S.sectorVisible, S.sectorFillOpacity ),
+		radius: S.sectorRadius,
+		startAngle: S.sectorStartAngle * MathUtils.DEG2RAD,
+		sectorAngle: S.sectorAngle * MathUtils.DEG2RAD,
+	};
+
+}
+
+function buildCircleStyle() {
+
+	return {
+		...fillStrokeStyle( 'circle', S.circleVisible, S.circleFillOpacity ),
+		radius: TOUCH_GROUND_CIRCLE_RADIUS,
+	};
+
+}
+
+function buildArrowStyle() {
+
+	return {
+		...fillStrokeStyle( 'arrow', S.arrowVisible, S.arrowFillOpacity ),
+		arrowType: S.arrowType,
+		width: TOUCH_GROUND_ARROW_WIDTH,
+		headLength: TOUCH_GROUND_ARROW_HEAD_LENGTH,
+	};
+
+}
+
+function buildDemoPointShape() {
+
+	return {
+		id: 'touch-ground-point',
+		kind: 'point',
+		coordinates: [[ 120, 30 ]],
+		style: buildPointStyle(),
+	};
+
+}
+
+function buildDemoLineShape() {
+
+	const first = TOUCH_GROUND_LINE_POINTS[ 0 ];
+	const last = TOUCH_GROUND_LINE_POINTS[ TOUCH_GROUND_LINE_POINTS.length - 1 ];
+	return {
+		id: 'touch-ground-line',
+		kind: 'line',
+		coordinates: cloneSourcePoints( [ first, last ] ),
+		style: lineStyle( 'line', S.lineVisible ),
+	};
+
+}
+
+function buildDemoPolylineShape() {
+
+	return {
+		id: 'touch-ground-polyline',
+		kind: 'polyline',
+		coordinates: cloneSourcePoints( TOUCH_GROUND_LINE_POINTS ),
+		style: lineStyle( 'polyline', S.polylineVisible ),
+	};
+
+}
+
+function buildDemoPolygonShape() {
+
+	return {
+		id: 'touch-ground-polygon',
 		kind: 'polygon',
-		coordinates: [
-			[ lon - r, lat - r, altitude ],
-			[ lon + r, lat - r, altitude ],
-			[ lon + r * 1.4, lat, altitude ],
-			[ lon + r, lat + r, altitude ],
-			[ lon - r, lat + r, altitude ],
-			[ lon - r * 1.4, lat, altitude ],
-		],
-		style: {
-			fillColor: '#22d3ee',
-			strokeColor: '#ecfeff',
-			strokeWidth: 0,
-			opacity: 0.7,
-			altitude,
+		coordinates: cloneSourcePoints( TOUCH_GROUND_POLYGON_POINTS ),
+		style: buildPolyStyle(),
+	};
+
+}
+
+function buildDemoRectangleShape() {
+
+	return {
+		id: 'touch-ground-rectangle',
+		kind: 'rectangle',
+		coordinates: [ getRectangleCenter() ],
+		style: buildRectStyle(),
+		userData: {
+			sourcePoints: cloneSourcePoints( TOUCH_GROUND_RECTANGLE_POINTS ),
 		},
 	};
 
 }
 
-/**
- * 把 single demo polygon 的所有顶点的 z 替换为新高度，走 plotEngine.updateShape
- * 触发重编译。编辑会话存在时同步 working shape，避免 handle 与 hot mesh 错位。
- *
- * @param {number} altitude 新的高度（米）
- * @returns {boolean} 是否更新了 shape
- */
-function applySingleDemoShapeHeight( altitude ) {
+function buildDemoSectorShape() {
 
-	if ( _singleDemoShapeId == null ) return false;
-	const shape = plotEngine.shapeStore.get( _singleDemoShapeId );
-	if ( ! shape ) return false;
+	return {
+		id: 'touch-ground-sector',
+		kind: 'sector',
+		coordinates: [[ 100.85, 22.65 ]],
+		style: buildSectorStyle(),
+	};
 
-	const newCoordinates = ( shape.coordinates || [] ).map( point => [
-		point[ 0 ],
-		point[ 1 ],
-		altitude,
-	] );
-	const newStyle = { ...( shape.style || {} ), altitude };
+}
 
-	plotEngine.updateShape( _singleDemoShapeId, {
-		coordinates: newCoordinates,
-		style: newStyle,
-	} );
+function buildDemoCircleShape() {
 
-	// 同步当前编辑会话的 working / initial shape，让 handle 立即跟随新高度
-	if ( plotEditor?.editingShapeId === _singleDemoShapeId ) {
+	return {
+		id: 'touch-ground-circle',
+		kind: 'circle',
+		coordinates: [[ 100.95, 22.80 ]],
+		style: buildCircleStyle(),
+	};
 
-		plotEditor._refreshSessionAfterExternalChange?.();
+}
+
+function buildDemoArrowShape() {
+
+	return {
+		id: 'touch-ground-arrow',
+		kind: 'arrow',
+		coordinates: cloneSourcePoints( TOUCH_GROUND_ARROW_POINTS ),
+		style: buildArrowStyle(),
+	};
+
+}
+
+function addDemoPoint( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoPointShape(), shouldInvalidate );
+
+}
+
+function addDemoLine( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoLineShape(), shouldInvalidate );
+
+}
+
+function addDemoPolyline( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoPolylineShape(), shouldInvalidate );
+
+}
+
+function addDemoPolygon( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoPolygonShape(), shouldInvalidate );
+
+}
+
+function addDemoRectangle( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoRectangleShape(), shouldInvalidate );
+
+}
+
+function addDemoSector( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoSectorShape(), shouldInvalidate );
+
+}
+
+function addDemoCircle( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoCircleShape(), shouldInvalidate );
+
+}
+
+function addDemoArrow( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoArrowShape(), shouldInvalidate );
+
+}
+
+function applyPoint() {
+
+	updateDemoShapeStyle( 'pointId', buildDemoPointShape() );
+
+}
+
+function applyLine() {
+
+	updateDemoShapeStyle( 'lineId', buildDemoLineShape() );
+
+}
+
+function applyPolyline() {
+
+	updateDemoShapeStyle( 'polylineId', buildDemoPolylineShape() );
+
+}
+
+function applyPoly() {
+
+	updateDemoShapeStyle( 'polygonId', buildDemoPolygonShape() );
+
+}
+
+function applyRect() {
+
+	updateDemoShapeStyle( 'rectId', buildDemoRectangleShape() );
+
+}
+
+function applySector() {
+
+	updateDemoShapeStyle( 'sectorId', buildDemoSectorShape() );
+
+}
+
+function applyCircle() {
+
+	updateDemoShapeStyle( 'circleId', buildDemoCircleShape() );
+
+}
+
+function applyArrow() {
+
+	updateDemoShapeStyle( 'arrowId', buildDemoArrowShape() );
+
+}
+
+function applyAllDemoStyles() {
+
+	for ( const entry of getDemoShapeEntries() ) entry.applyFn();
+
+}
+
+function updateAllShapeHeights( altitude ) {
+
+	for ( const id of [ ...worldShapeIds, ...localShapeIds, ...terrainShapeIds, ...modelShapeIds ] ) {
+
+		const shape = plotEngine.shapeStore.get( id );
+		if ( ! shape ) continue;
+		plotEngine.updateShape( id, {
+			coordinates: ( shape.coordinates || [] ).map( point => [
+				point[ 0 ],
+				point[ 1 ],
+				altitude,
+			] ),
+			style: {
+				altitude,
+			},
+		} );
+		updateEditingSessionAfterExternalChange( id );
 
 	}
 
-	return true;
+	requestConditionalTilesUpdates();
 
 }
 
@@ -1183,12 +1593,6 @@ function withForcedHeight( shape, height ) {
 			height,
 		] ),
 	};
-
-}
-
-function getMetersPerDegreeLon( latRad ) {
-
-	return Math.cos( latRad ) * 111320;
 
 }
 
@@ -1229,23 +1633,85 @@ function cartographicPointToWorldPoint( point ) {
 
 }
 
-function cartographicStyleToWorldStyle( shape ) {
+function metersToLonDegrees( meters, latDeg ) {
+
+	return Number( meters ) / getDemoMetersPerDegreeLon( latDeg * MathUtils.DEG2RAD );
+
+}
+
+function metersToLatDegrees( meters ) {
+
+	return Number( meters ) / METERS_PER_DEG_LAT;
+
+}
+
+function getShapeReferenceLatDeg( shape ) {
+
+	const coordinates = shape.coordinates || [];
+	let total = 0;
+	let count = 0;
+	for ( const point of coordinates ) {
+
+		const lat = Number( point[ 1 ] );
+		if ( ! Number.isFinite( lat ) ) continue;
+		total += lat;
+		count ++;
+
+	}
+
+	return count > 0 ? total / count : TOUCH_GROUND_FRAME_LAT_DEG;
+
+}
+
+function metricStyleToCartographicStyle( shape ) {
 
 	const style = { ...( shape.style || {} ) };
-	const metersPerDegreeLon = getMetersPerDegreeLon( SOONSPACE_LAT );
+	if ( style.units !== 'meters' ) return style;
 
+	const lat = getShapeReferenceLatDeg( shape );
+	for ( const key of [ 'size', 'strokeWidth', 'boundsPadding', 'radius', 'width', 'headLength' ] ) {
+
+		if ( Number.isFinite( Number( style[ key ] ) ) ) style[ key ] = metersToLonDegrees( style[ key ], lat );
+
+	}
+
+	if ( Number.isFinite( Number( style.height ) ) ) style.height = metersToLatDegrees( style.height );
+	delete style.units;
+	return style;
+
+}
+
+function getDemoMetersPerDegreeLon( latRad ) {
+
+	return Math.max( Math.cos( latRad ) * 111320, 1e-6 );
+
+}
+
+function cartographicDemoStyleToWorldStyle( shape ) {
+
+	const style = { ...( shape.style || {} ) };
+	if ( style.units === 'meters' ) {
+
+		delete style.units;
+		return style;
+
+	}
+
+	const metersPerDegreeLon = getDemoMetersPerDegreeLon( getShapeReferenceLatDeg( shape ) * MathUtils.DEG2RAD );
 	if ( Number.isFinite( style.width ) ) style.width *= metersPerDegreeLon;
+	if ( Number.isFinite( style.height ) ) style.height *= METERS_PER_DEG_LAT;
 	if ( Number.isFinite( style.headLength ) ) style.headLength *= metersPerDegreeLon;
 	if ( Number.isFinite( style.radius ) ) style.radius *= metersPerDegreeLon;
+	if ( Number.isFinite( style.size ) ) style.size *= metersPerDegreeLon;
 	if ( Number.isFinite( style.strokeWidth ) && style.strokeWidth <= 1 ) {
 
 		style.strokeWidth = Math.max( style.strokeWidth * Math.min( metersPerDegreeLon, METERS_PER_DEG_LAT ), 2 );
 
 	}
 
-	if ( shape.kind === 'point' ) {
+	if ( Number.isFinite( style.boundsPadding ) && style.boundsPadding <= 1 ) {
 
-		style.size = Math.max( Number( style.size ?? 0 ), 10 );
+		style.boundsPadding *= Math.min( metersPerDegreeLon, METERS_PER_DEG_LAT );
 
 	}
 
@@ -1253,391 +1719,13 @@ function cartographicStyleToWorldStyle( shape ) {
 
 }
 
-function cartographicShapeToWorldShape( shape ) {
+function demoCartographicShapeToWorldShape( shape ) {
 
 	return {
 		...shape,
 		coordinates: ( shape.coordinates || [] ).map( cartographicPointToWorldPoint ),
-		style: cartographicStyleToWorldStyle( shape ),
+		style: cartographicDemoStyleToWorldStyle( shape ),
 	};
-
-}
-
-function getDemoPlotCount() {
-
-	return Math.max( 1, Number( params.demoPlotCount ?? DEFAULT_DEMO_PLOT_COUNT ) || DEFAULT_DEMO_PLOT_COUNT );
-
-}
-
-function getDemoPlotGridColumns( totalCount ) {
-
-	return Math.max( 1, Math.ceil( Math.sqrt( totalCount ) ) );
-
-}
-
-function getDemoPlotOffset( index, totalCount = getDemoPlotCount() ) {
-
-	const columns = getDemoPlotGridColumns( totalCount );
-	const column = index % columns;
-	const row = Math.floor( index / columns );
-	const rows = Math.ceil( totalCount / columns );
-
-	return {
-		lon: ( column - ( columns - 1 ) * 0.5 ) * DEMO_PLOT_LON_STEP,
-		lat: ( row - ( rows - 1 ) * 0.5 ) * DEMO_PLOT_LAT_STEP,
-	};
-
-}
-
-function getDemoPlotStyle( index, overrides = {} ) {
-
-	const color = DEMO_PLOT_COLORS[ index % DEMO_PLOT_COLORS.length ];
-
-	return {
-		...SOONSPACE_POLYGON_STYLE,
-		fillColor: color,
-		strokeColor: '#ecfeff',
-		strokeWidth: DEMO_PLOT_STROKE_WIDTH,
-		opacity: 0.62,
-		...overrides,
-	};
-
-}
-
-function getDemoPlotCenter( index, totalCount ) {
-
-	const offset = getDemoPlotOffset( index, totalCount );
-	return [
-		SOONSPACE_LON_DEG + offset.lon,
-		SOONSPACE_LAT_DEG + offset.lat,
-	];
-
-}
-
-function getLocalDemoPlotCenter( index, totalCount ) {
-
-	const columns = getDemoPlotGridColumns( totalCount );
-	const rows = Math.ceil( totalCount / columns );
-	const column = index % columns;
-	const row = Math.floor( index / columns );
-	const stepX = LOCAL_SURFACE_BOARD_SPAN / Math.max( columns, 1 );
-	const stepY = LOCAL_SURFACE_BOARD_SPAN / Math.max( rows, 1 );
-
-	return [
-		( column - ( columns - 1 ) * 0.5 ) * stepX,
-		( row - ( rows - 1 ) * 0.5 ) * stepY,
-	];
-
-}
-
-function getDemoPlotShape( index, idPrefix, options = {} ) {
-
-	const id = `${ idPrefix }-${ index }`;
-	const types = options.types || DEMO_WORLD_PLOT_TYPES;
-	const kind = types[ index % types.length ];
-	const totalCount = options.totalCount ?? getDemoPlotCount();
-	const [ lon, lat ] = options.coordinateSpace === 'local'
-		? getLocalDemoPlotCenter( index, totalCount )
-		: getDemoPlotCenter( index, totalCount );
-	const size = options.size ?? DEMO_PLOT_SIZE;
-	const halfSize = size * 0.5;
-	const style = getDemoPlotStyle( index, options.styleOverrides );
-
-	if ( kind === 'point' ) {
-
-		return {
-			id,
-			kind,
-			coordinates: [ [ lon, lat ] ],
-			style: {
-				...style,
-				size: size,
-				strokeWidth: 0,
-			},
-		};
-
-	}
-
-	if ( kind === 'line' ) {
-
-		return {
-			id,
-			kind,
-			coordinates: [
-				[ lon - halfSize, lat - halfSize ],
-				[ lon + halfSize, lat + halfSize ],
-			],
-			style: {
-				...style,
-				fillColor: '#000000',
-				strokeWidth: DEMO_PLOT_STROKE_WIDTH * 1.6,
-			},
-		};
-
-	}
-
-	if ( kind === 'polyline' ) {
-
-		return {
-			id,
-			kind,
-			coordinates: [
-				[ lon - halfSize, lat - halfSize ],
-				[ lon, lat + halfSize ],
-				[ lon + halfSize, lat - halfSize * 0.2 ],
-			],
-			style: {
-				...style,
-				fillColor: '#000000',
-				strokeWidth: DEMO_PLOT_STROKE_WIDTH * 1.5,
-			},
-		};
-
-	}
-
-	if ( kind === 'polygon' ) {
-
-		return {
-			id,
-			kind,
-			coordinates: [
-				[ lon, lat + halfSize ],
-				[ lon + halfSize, lat ],
-				[ lon + halfSize * 0.25, lat - halfSize ],
-				[ lon - halfSize, lat - halfSize * 0.35 ],
-			],
-			style,
-		};
-
-	}
-
-	if ( kind === 'rectangle' ) {
-
-		return {
-			id,
-			kind,
-			coordinates: [
-				[ lon - halfSize, lat - halfSize * 0.7 ],
-				[ lon + halfSize, lat + halfSize * 0.7 ],
-			],
-			style,
-		};
-
-	}
-
-	if ( kind === 'circle' ) {
-
-		return {
-			id,
-			kind,
-			coordinates: [ [ lon, lat ] ],
-			style: {
-				...style,
-				radius: halfSize,
-			},
-		};
-
-	}
-
-	if ( kind === 'sector' ) {
-
-		return {
-			id,
-			kind,
-			coordinates: [ [ lon, lat ] ],
-			style: {
-				...style,
-				radius: halfSize,
-				startAngle: ( index % 8 ) * Math.PI * 0.25,
-				sectorAngle: Math.PI * 1.25,
-			},
-		};
-
-	}
-
-	return {
-		id,
-		kind: 'arrow',
-		coordinates: [
-			[ lon - halfSize, lat - halfSize * 0.4 ],
-			[ lon + halfSize, lat + halfSize * 0.4 ],
-		],
-		style: {
-			...style,
-			width: size * 0.28,
-			headLength: size * 0.45,
-		},
-	};
-
-}
-
-function addSoonspaceDemoShapes( addShape, idPrefix, options = {} ) {
-
-	const totalCount = options.totalCount ?? getDemoPlotCount();
-	const startIndex = options.startIndex ?? 0;
-	const endIndex = Math.min( options.endIndex ?? totalCount, totalCount );
-
-	for ( let index = startIndex; index < endIndex; index ++ ) {
-
-		addShape( getDemoPlotShape( index, idPrefix, {
-			...options,
-			totalCount,
-		} ) );
-
-	}
-
-}
-
-function cancelDemoGeneration() {
-
-	demoGenerationToken ++;
-	if ( demoGenerationHandle !== null ) {
-
-		cancelAnimationFrame( demoGenerationHandle );
-		demoGenerationHandle = null;
-
-	}
-
-	demoGenerationProgress = null;
-
-}
-
-function clearDemoShapes() {
-
-	cancelDemoGeneration();
-	if ( plotEditor?.isEditing ) plotEditor.cancelEdit();
-	plotEngine.stop();
-	plotEngine.clearShapes();
-	worldShapeIds.length = 0;
-	localShapeIds.length = 0;
-	terrainShapeIds.length = 0;
-	modelShapeIds.length = 0;
-	_singleDemoShapeId = null;
-
-}
-
-function finalizeDemoShapes( frameCamera ) {
-
-	plotEngine.invalidate();
-	plotEngine.update();
-	plotEngine.start();
-	demoGenerationProgress = null;
-
-	if ( ! frameCamera ) return;
-
-	if ( params.targetMode === 'tiles' ) {
-
-		frameSoonModel();
-
-	} else if ( params.targetMode === 'surface' ) {
-
-		frameTerrain();
-
-	} else {
-
-		frameLocalTarget();
-
-	}
-
-}
-
-function populateDemoShapes( addShape, idPrefix, options = {}, frameCamera = true ) {
-
-	const totalCount = getDemoPlotCount();
-	const token = ++ demoGenerationToken;
-	let startIndex = 0;
-
-	demoGenerationProgress = {
-		current: 0,
-		total: totalCount,
-	};
-
-	const step = () => {
-
-		if ( token !== demoGenerationToken ) return;
-
-		const endIndex = Math.min( startIndex + DEMO_PLOT_BATCH_SIZE, totalCount );
-		addSoonspaceDemoShapes( addShape, idPrefix, {
-			...options,
-			totalCount,
-			startIndex,
-			endIndex,
-		} );
-		startIndex = endIndex;
-		demoGenerationProgress.current = startIndex;
-
-		if ( startIndex < totalCount ) {
-
-			demoGenerationHandle = requestAnimationFrame( step );
-
-		} else {
-
-			demoGenerationHandle = null;
-			finalizeDemoShapes( frameCamera );
-
-		}
-
-	};
-
-	step();
-
-}
-
-function addWorldDemoShapes( frameCamera = true ) {
-
-	populateDemoShapes(
-		shape => addWorldShape(
-			cartographicShapeToWorldShape( shape ),
-			params.worldHeight,
-			false,
-		),
-		'world-aoi',
-		{
-			types: DEMO_WORLD_PLOT_TYPES,
-			styleOverrides: {
-				opacity: params.localOpacity,
-			},
-		},
-		frameCamera,
-	);
-
-}
-
-function addSurfaceDemoShapes( frameCamera = true ) {
-
-	populateDemoShapes( shape => addSurfaceShape( shape, false ), 'surface-aoi', {
-		types: DEMO_SURFACE_PLOT_TYPES,
-		styleOverrides: {
-			strokeWidth: 0,
-			opacity: params.localOpacity,
-		},
-	}, frameCamera );
-
-}
-
-function addTerrainDemoShapes( frameCamera = true ) {
-
-	populateDemoShapes( shape => addTerrainShape( shape, false ), 'terrain-aoi', {
-		types: DEMO_TILE_PLOT_TYPES,
-		styleOverrides: {
-			...SOONSPACE_POLYGON_STYLE,
-			fillColor: '#f97316',
-			strokeColor: '#fed7aa',
-			strokeWidth: 0,
-			opacity: 0.6,
-		},
-	}, frameCamera );
-
-}
-
-function addModelDemoShapes( frameCamera = true ) {
-
-	populateDemoShapes( shape => addModelShape( shape, false ), 'model-aoi', {
-		types: DEMO_TILE_PLOT_TYPES,
-		styleOverrides: {
-			strokeWidth: 0,
-		},
-	}, frameCamera );
 
 }
 
@@ -1716,47 +1804,33 @@ function addModelShape( shape, shouldInvalidate = true ) {
 
 }
 
-function randomizeLocalShapes() {
-
-	localTarget.updateMatrixWorld( true );
-
-	_moveRight.set( 1, 0, 0 ).transformDirection( localTarget.matrixWorld ).normalize();
-	_moveForward.set( 0, 0, 1 ).transformDirection( localTarget.matrixWorld ).normalize();
-
-	const offsetRight = ( Math.random() - 0.5 ) * 2000;
-	const offsetForward = ( Math.random() - 0.5 ) * 2000;
-	localTargetPlacementState = 'manual';
-	localTarget.position
-		.addScaledVector( _moveRight, offsetRight )
-		.addScaledVector( _moveForward, offsetForward );
-	localTarget.updateMatrixWorld( true );
-	syncWorldGroupToLocalTarget();
-	if ( params.targetMode !== 'tiles' || ! tiles ) frameLocalTarget();
-
-}
 
 function updateWorldHeight( value ) {
 
 	const altitude = Number( value ) || 0;
 	params.worldHeight = altitude;
+	updateAllShapeHeights( altitude );
+}
 
-	// single 模式：只更新唯一 demo polygon 的 z，保留用户编辑过的形状
-	if ( params.demoMode === 'single' && _singleDemoShapeId != null ) {
 
-		const updated = applySingleDemoShapeHeight( altitude );
-		if ( updated ) return;
+function addFillControls( folder, prefix, apply ) {
 
-	}
-
-	// random 模式 / single 模式但没有现存 shape：走重置路径
-	resetShapes( { frameCamera: false } );
+	folder.addColor( S, `${ prefix }FillColor` ).name( 'Fill' ).onChange( apply );
+	folder.add( S, `${ prefix }FillOpacity`, 0, 100, 1 ).name( 'Fill Opacity' ).onChange( apply );
 
 }
 
-function updateDemoPlotCount( value ) {
+function addStrokeControls( folder, prefix, apply, maxWidth = 20 ) {
 
-	params.demoPlotCount = Number( value );
-	resetShapes( { frameCamera: false } );
+	folder.addColor( S, `${ prefix }StrokeColor` ).name( 'Stroke' ).onChange( apply );
+	folder.add( S, `${ prefix }StrokeWidth`, 0, maxWidth, 1 ).name( 'Stroke Width' ).onChange( apply );
+	folder.add( S, `${ prefix }StrokeOpacity`, 0, 100, 1 ).name( 'Stroke Opacity' ).onChange( apply );
+
+}
+
+function addVisibleToggle( folder, prefix, apply ) {
+
+	folder.add( S, `${ prefix }Visible` ).name( 'Visible' ).onChange( apply );
 
 }
 
@@ -1782,34 +1856,117 @@ function setupGui() {
 
 			plotEngine.setMode( mode );
 			requestConditionalTilesUpdates();
-			// 始终重建 demo shape，让 single 模式也能根据 targetMode 切换 attachment
-			// （world / surface / tiles 三种 attachment 视觉差别明显——
-			//   world：悬浮在 SoonCPS 上空；surface：贴 Cesium 地形；tiles：贴 SoonCPS 模型）
+			// 婵绮撻柌宥呯紦 demo shape閿涘矁顔€ single 濡€崇础娑旂喕鍏橀弽瑙勫祦 targetMode 閸掑洦宕?attachment
+			// 閿涘澋orld / surface / tiles 娑撳顫?attachment 鐟欏棜顫庡顔煎焼閺勫孩妯夐垾鏂衡偓?
+			//   world閿涙碍鍋撳ù顔兼躬 SoonCPS 娑撳﹦鈹栭敍娉倁rface閿涙俺鍒?Cesium 閸︽澘鑸伴敍娉僫les閿涙俺鍒?SoonCPS 濡€崇€烽敍?
 			resetShapes( { frameCamera: false } );
 
 		} );
 	gui.add( params, 'showLocalBoard' ).name( 'Show local board' ).onChange( updateLocalBoardVisibility );
 	gui.add( params, 'showTerrain' ).name( 'Show terrain' ).onChange( reinstantiateTiles );
 	gui.add( params, 'showSoonModel' ).name( 'Show SoonCPS model' ).onChange( reinstantiateModelTiles );
-	gui.add( params, 'localOpacity', 0.1, 1, 0.05 ).name( 'Local opacity' ).onChange( updateLocalOpacity );
+	gui.add( params, 'localOpacity', 0, 1, 0.05 ).name( 'Global opacity' ).onChange( updateLocalOpacity );
 	gui.add( params, 'worldHeight', - 2000, 10000, 10 ).name( 'World height' ).onChange( updateWorldHeight );
-	gui.add( params, 'demoMode', {
-		'Single (editable)': 'single',
-		'Random (stress)': 'random',
-	} )
-		.name( 'Demo mode' )
-		.onChange( () => resetShapes( { frameCamera: true } ) );
-	gui.add( params, 'demoPlotCount', {
-		100: 100,
-		500: 500,
-		1000: 1000,
-		100000: 100000,
-		1000000: 1000000,
-	} )
-		.name( 'Plot count' )
-		.onChange( updateDemoPlotCount );
-	gui.add( params, 'randomizeLocal' ).name( 'Move local target' );
 	gui.add( params, 'resetShapes' ).name( 'Reset shapes' );
+
+	const ptF = gui.addFolder( 'Point' );
+	ptF.add( S, 'pointStyle', [ 'circle', 'square' ] ).name( 'Style' ).onChange( applyPoint );
+	ptF.add( S, 'pointSize', 100, 10000, 100 ).name( 'Size (m)' ).onChange( applyPoint );
+	addFillControls( ptF, 'point', applyPoint );
+	addStrokeControls( ptF, 'point', applyPoint );
+	addVisibleToggle( ptF, 'point', applyPoint );
+
+	const lnF = gui.addFolder( 'Line' );
+	lnF.add( S, 'lineStrokeStyle', [ 'solid', 'dashed', 'dotted' ] ).name( 'Style' ).onChange( applyLine );
+	addStrokeControls( lnF, 'line', applyLine, 30 );
+	addVisibleToggle( lnF, 'line', applyLine );
+
+	const plF = gui.addFolder( 'Polyline' );
+	plF.add( S, 'polylineStrokeStyle', [ 'solid', 'dashed', 'dotted' ] ).name( 'Style' ).onChange( applyPolyline );
+	addStrokeControls( plF, 'polyline', applyPolyline, 30 );
+	addVisibleToggle( plF, 'polyline', applyPolyline );
+
+	const pgF = gui.addFolder( 'Polygon' );
+	addFillControls( pgF, 'poly', applyPoly );
+	addStrokeControls( pgF, 'poly', applyPoly );
+	addVisibleToggle( pgF, 'poly', applyPoly );
+
+	const rcF = gui.addFolder( 'Rectangle' );
+	addFillControls( rcF, 'rect', applyRect );
+	addStrokeControls( rcF, 'rect', applyRect );
+	addVisibleToggle( rcF, 'rect', applyRect );
+
+	const scF = gui.addFolder( 'Sector' );
+	addFillControls( scF, 'sector', applySector );
+	addStrokeControls( scF, 'sector', applySector );
+	scF.add( S, 'sectorRadius', 500, 30000, 500 ).name( 'Radius (m)' ).onChange( applySector );
+	scF.add( S, 'sectorStartAngle', - 360, 360, 1 ).name( 'Start Angle' ).onChange( applySector );
+	scF.add( S, 'sectorAngle', - 360, 360, 1 ).name( 'Sector Angle' ).onChange( applySector );
+	addVisibleToggle( scF, 'sector', applySector );
+
+	const ciF = gui.addFolder( 'Circle' );
+	addFillControls( ciF, 'circle', applyCircle );
+	addStrokeControls( ciF, 'circle', applyCircle );
+	addVisibleToggle( ciF, 'circle', applyCircle );
+
+	const arF = gui.addFolder( 'Arrow' );
+	arF.add( S, 'arrowType', [ 'fine', 'curved', 'attack', 'straight' ] ).name( 'Type' ).onChange( applyArrow );
+	addFillControls( arF, 'arrow', applyArrow );
+	addStrokeControls( arF, 'arrow', applyArrow );
+	addVisibleToggle( arF, 'arrow', applyArrow );
+
+	const deleteFolder = gui.addFolder( 'Delete & Re-add' );
+	const folderByIdKey = {
+		pointId: [ ptF ],
+		lineId: [ lnF ],
+		polylineId: [ plF ],
+		polygonId: [ pgF ],
+		rectId: [ rcF ],
+		sectorId: [ scF ],
+		circleId: [ ciF ],
+		arrowId: [ arF ],
+	};
+
+	for ( const entry of getDemoShapeEntries() ) {
+
+		const actions = {
+			delete: () => {
+
+				removeDemoShape( entry.idKey );
+				folderByIdKey[ entry.idKey ].forEach( folder => folder.hide() );
+
+			},
+			add: () => {
+
+				if ( shapeIds[ entry.idKey ] != null ) return;
+				shapeIds[ entry.idKey ] = entry.addFn();
+				folderByIdKey[ entry.idKey ].forEach( folder => folder.show() );
+
+			},
+		};
+		deleteFolder.add( actions, 'delete' ).name( `Delete ${ entry.label }` );
+		deleteFolder.add( actions, 'add' ).name( `Re-add ${ entry.label }` );
+
+	}
+
+	deleteFolder.add( {
+		clearAll: () => {
+
+			clearFixedDemoShapes();
+			plotEngine.start();
+			for ( const folders of Object.values( folderByIdKey ) ) folders.forEach( folder => folder.hide() );
+
+		},
+	}, 'clearAll' ).name( 'Clear All' );
+
+	deleteFolder.add( {
+		reAddAll: () => {
+
+			reAddAllDemoShapes();
+			for ( const folders of Object.values( folderByIdKey ) ) folders.forEach( folder => folder.show() );
+
+		},
+	}, 'reAddAll' ).name( 'Re-add All' );
 
 	const cameraFolder = gui.addFolder( 'Camera' );
 	cameraFolder.add( params, 'focusLocalBoard' ).name( 'Focus local board' );
@@ -1828,6 +1985,7 @@ function setupGui() {
 	soonFolder.add( params, 'reloadSoonModel' ).name( 'Reload model' );
 
 	const editorFolder = gui.addFolder( 'Editor' );
+	editorFolder.add( params, 'editorBeginEdit' ).name( 'Begin edit selected' );
 	editorFolder.add( params, 'editorEndEdit' ).name( 'End edit (commit)' );
 	editorFolder.add( params, 'editorCancelEdit' ).name( 'Cancel edit' );
 	editorFolder.add( params, 'editorDeselect' ).name( 'Deselect' );
@@ -1842,15 +2000,7 @@ function setupGui() {
 
 function updateLocalOpacity() {
 
-	for ( const id of [ ...worldShapeIds, ...localShapeIds, ...terrainShapeIds, ...modelShapeIds ] ) {
-
-		plotEngine.updateShape( id, {
-			style: {
-				opacity: params.localOpacity,
-			},
-		} );
-
-	}
+	applyAllDemoStyles();
 
 }
 
@@ -1920,9 +2070,6 @@ function updateCredits() {
 		: params.showSoonModel
 			? 'SoonCPS model loading or unavailable'
 			: 'SoonCPS model disabled';
-	const generationStatus = demoGenerationProgress
-		? `, generating ${ demoGenerationProgress.current }/${ demoGenerationProgress.total }`
-		: '';
-	credits.innerText = `PlotEngine: ${ plotEngine.shapeStore.size }/${ getDemoPlotCount() } shapes, mode=${ params.targetMode }${ generationStatus }, ${ terrainStatus }, ${ modelStatus }`;
+	credits.innerText = `PlotEngine: ${ plotEngine.shapeStore.size }/${ DEMO_SHAPE_COUNT } shapes, mode=${ params.targetMode }, ${ terrainStatus }, ${ modelStatus }`;
 
 }

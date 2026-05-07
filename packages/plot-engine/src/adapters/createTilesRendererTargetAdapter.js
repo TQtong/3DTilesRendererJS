@@ -4,6 +4,7 @@ import {
 } from 'three';
 
 const RAD2DEG = 180 / Math.PI;
+const DEG2RAD = Math.PI / 180;
 
 const _inverseMatrix = /* @__PURE__ */ new Matrix4();
 const _meshMatrix = /* @__PURE__ */ new Matrix4();
@@ -209,6 +210,68 @@ export function createTilesRendererTargetAdapter() {
 			out[ 1 ] = worldPosition.z;
 			out[ 2 ] = worldPosition.y;
 			return out;
+
+		},
+
+		/**
+		 * 反向投影：把 cartographic (lon, lat[, height]) 转回世界坐标。
+		 *
+		 * 流程：
+		 *   1) (lon, lat, h) → ECEF 椭球坐标（getCartographicToPosition）
+		 *   2) ECEF → 世界 frame（applyMatrix4(group.matrixWorld)）
+		 *
+		 * 用于 TiledPipe 在 meshOverlay 模式下，把 cartographic shape 的顶点
+		 * 转到世界坐标，再下沉到目标 group 的局部 frame 来生成顶点 mesh。
+		 *
+		 * @param {Array<number>} cartoPosition - [lonDeg, latDeg, heightMeters]
+		 * @param {object} entry - tile entry（当前实现未使用，预留扩展）
+		 * @param {object} target - PlotTarget
+		 * @param {Vector3|Array<number>} out - 输出（Vector3 或 [x,y,z]）
+		 * @returns {Vector3|Array<number>|null}
+		 */
+		unprojectPosition( cartoPosition, entry, target, out = null ) {
+
+			const source = getTilesRendererSource( target );
+			const ellipsoid = source?.ellipsoid;
+			const group = source?.group;
+
+			const lonDeg = Number( cartoPosition[ 0 ] );
+			const latDeg = Number( cartoPosition[ 1 ] );
+			const height = Number( cartoPosition[ 2 ] ?? 0 );
+			if ( ! Number.isFinite( lonDeg ) || ! Number.isFinite( latDeg ) ) return null;
+
+			if ( ellipsoid && group ) {
+
+				ellipsoid.getCartographicToPosition(
+					latDeg * DEG2RAD,
+					lonDeg * DEG2RAD,
+					height,
+					_position,
+				);
+				group.updateMatrixWorld?.( true );
+				_position.applyMatrix4( group.matrixWorld );
+
+			} else {
+
+				// 无椭球时退化为平面：(lon, lat) 直接当作 (x, z)，height 当作 y
+				_position.set( lonDeg, height, latDeg );
+
+			}
+
+			if ( out && typeof out === 'object' && 'x' in out ) {
+
+				out.x = _position.x;
+				out.y = _position.y;
+				out.z = _position.z;
+				return out;
+
+			}
+
+			const arr = Array.isArray( out ) ? out : [ 0, 0, 0 ];
+			arr[ 0 ] = _position.x;
+			arr[ 1 ] = _position.y;
+			arr[ 2 ] = _position.z;
+			return arr;
 
 		},
 	};
