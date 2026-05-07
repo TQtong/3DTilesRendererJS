@@ -10,7 +10,7 @@ import {
 	ImageOverlayPlugin,
 	QuantizedMeshPlugin,
 } from 'um-3d-tiles-renderer/plugins';
-import { PlotEngine } from 'um-plot-engine';
+import { PlotEngine, PlotEditor } from 'um-plot-engine';
 import {
 	AmbientLight,
 	AxesHelper,
@@ -34,7 +34,10 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 
 let camera, controls, renderer, scene;
-let tiles, modelTiles, plotEngine, localTarget, localTargetVisuals;
+let tiles, modelTiles, plotEngine, plotEditor, localTarget, localTargetVisuals;
+let editorStatusController = null;
+let editorUndoController = null;
+let editorRedoController = null;
 
 const worldShapeIds = [];
 const localShapeIds = [];
@@ -57,6 +60,7 @@ const DEMO_PLOT_LON_STEP = 0.0012;
 const DEMO_PLOT_LAT_STEP = 0.0012;
 const DEMO_PLOT_SIZE = 0.00042;
 const DEMO_PLOT_STROKE_WIDTH = 0.00006;
+const LOCAL_EDITOR_HANDLE_SIZE = 0.6;
 const LOCAL_SURFACE_BOARD_SPAN = 72;
 const CONDITIONAL_TILE_UPDATE_FRAMES = 45;
 const SOONSPACE_POLYGON_STYLE = {
@@ -142,8 +146,9 @@ const params = {
 	terrainVisible: true,
 	soonModelVisible: true,
 	localOpacity: 0.75,
-	worldHeight: 0,
+	worldHeight: 300,
 	demoPlotCount: DEFAULT_DEMO_PLOT_COUNT,
+	demoMode: 'single',
 	targetMode: 'world',
 	reloadTerrain: reinstantiateTiles,
 	reloadSoonModel: reinstantiateModelTiles,
@@ -152,7 +157,26 @@ const params = {
 	focusSoonModel: frameSoonModel,
 	resetShapes,
 	randomizeLocal: randomizeLocalShapes,
+	editorEndEdit: () => plotEditor?.endEdit(),
+	editorCancelEdit: () => plotEditor?.cancelEdit(),
+	editorDeselect: () => plotEditor?.deselect(),
+	editorUndo: () => plotEditor?.undo(),
+	editorRedo: () => plotEditor?.redo(),
+	editorStatus: 'idle',
 };
+
+// 单 polygon 演示模式下，记录由 addSingleEditDemoShape 创建的 shape id，
+// 便于"高度滑块"直接更新该 shape 而无需重新创建
+let _singleDemoShapeId = null;
+
+const _clickState = {
+	startX: 0,
+	startY: 0,
+	startTime: 0,
+	pointerId: null,
+};
+const CLICK_MAX_MOVE_PX = 6;
+const CLICK_MAX_MS = 400;
 
 init();
 animate();
@@ -289,7 +313,124 @@ function setupPlotEngine() {
 	plotEngine.setMode( params.targetMode );
 	plotEngine.start();
 
+	setupPlotEditor();
+
 }
+
+function setupPlotEditor() {
+
+	if ( plotEditor ) plotEditor.dispose();
+
+	plotEditor = new PlotEditor( {
+		plotEngine,
+		camera,
+		renderer,
+		// 默认手柄大小（局部坐标单位）。在不同 attach 模式下需要按尺度调整：
+		//  - local board (尺度 ~80m)：~0.6
+		//  - world (lon/lat 弧度尺度)：~0.00015
+		// 这里给一个保守值，由调用方在 beginEdit 后通过 setSizeScale 覆盖
+		handleSizeScale: 0.6,
+	} );
+
+	plotEditor.addEventListener( 'history-change', refreshEditorGui );
+	plotEditor.addEventListener( 'edit-begin', refreshEditorGui );
+	plotEditor.addEventListener( 'edit-end', refreshEditorGui );
+	plotEditor.addEventListener( 'edit-cancel', refreshEditorGui );
+	plotEditor.addEventListener( 'selection-change', refreshEditorGui );
+
+	attachShapePickListener();
+
+}
+
+// ── 点击拾取：把"点击空白处的 shape"翻译为"进入该 shape 的编辑会话" ──
+//
+// 仅当点击是真正的"短按"（按下与抬起位置接近、间隔短）才视为 click，
+// 否则视作 GlobeControls 自己的拖拽，不打扰相机操作。
+function attachShapePickListener() {
+
+	const dom = renderer.domElement;
+	dom.addEventListener( 'pointerdown', onShapePickPointerDown );
+	dom.addEventListener( 'pointerup', onShapePickPointerUp );
+
+}
+
+function onShapePickPointerDown( event ) {
+
+	if ( event.button !== 0 ) return;
+	_clickState.startX = event.clientX;
+	_clickState.startY = event.clientY;
+	_clickState.startTime = performance.now?.() ?? Date.now();
+	_clickState.pointerId = event.pointerId;
+
+}
+
+function onShapePickPointerUp( event ) {
+
+	if ( event.button !== 0 ) return;
+	if ( _clickState.pointerId !== event.pointerId ) return;
+	const dx = event.clientX - _clickState.startX;
+	const dy = event.clientY - _clickState.startY;
+	const dt = ( performance.now?.() ?? Date.now() ) - _clickState.startTime;
+	_clickState.pointerId = null;
+
+	if ( Math.abs( dx ) > CLICK_MAX_MOVE_PX || Math.abs( dy ) > CLICK_MAX_MOVE_PX ) return;
+	if ( dt > CLICK_MAX_MS ) return;
+
+	// 编辑期间：让 DragController 自己处理 handle 命中；这里只在"无 handle 命中"
+	// 的情况下做 shape pick。最容易的判定是：plotEditor 的 isEditing 状态没变，
+	// 但其实更可靠的方式是直接尝试 pick——如果 hit 落在另一个 shape 上，则切换。
+	if ( ! plotEditor ) return;
+	const shapeId = plotEditor.pickShapeAt( event.clientX, event.clientY );
+	if ( shapeId == null ) return;
+	if ( plotEditor.editingShapeId === shapeId ) return;
+
+	plotEditor.beginEdit( shapeId );
+	const shape = plotEngine.shapeStore.get( shapeId );
+	if ( shape ) {
+
+		// 不同 attachment 的坐标尺度差异巨大，按尺度选择手柄大小：
+		//  - world (lon/lat 弧度)：~0.00015
+		//  - surface 上 local-board / 米尺度：~0.6
+		plotEditor._session?.handleLayer?.setSizeScale?.( getEditorHandleSizeScale( shape ) );
+
+	}
+
+	refreshEditorGui();
+
+}
+
+function getEditorHandleSizeScale( shape ) {
+
+	void shape;
+	return LOCAL_EDITOR_HANDLE_SIZE;
+
+}
+
+function refreshEditorGui() {
+
+	if ( ! plotEditor ) return;
+	const editing = plotEditor.editingShapeId;
+	const selected = plotEditor.selectedShapeId;
+	if ( editing != null ) {
+
+		params.editorStatus = `editing #${ editing }`;
+
+	} else if ( selected != null ) {
+
+		params.editorStatus = `selected #${ selected }`;
+
+	} else {
+
+		params.editorStatus = 'idle';
+
+	}
+
+	editorStatusController?.updateDisplay?.();
+	editorUndoController?.updateDisplay?.();
+	editorRedoController?.updateDisplay?.();
+
+}
+
 
 function setupLocalTarget() {
 
@@ -868,6 +1009,17 @@ function resetShapes( options = {} ) {
 	const frameCamera = options.frameCamera !== false;
 	clearDemoShapes();
 
+	// "single" 模式：默认值，仅渲染一个大多边形，便于演示编辑
+	// "random" 模式：保留原有的随机多 shape 测试场景
+	const demoMode = params.demoMode ?? 'single';
+
+	if ( demoMode === 'single' ) {
+
+		addSingleEditDemoShape( frameCamera );
+		return;
+
+	}
+
 	if ( params.targetMode === 'tiles' ) {
 
 		addModelDemoShapes( frameCamera );
@@ -881,6 +1033,130 @@ function resetShapes( options = {} ) {
 		addSurfaceDemoShapes( frameCamera );
 
 	}
+
+}
+
+/**
+ * 单一编辑演示：在 SoonCPS 中心附近放一个面积较大的多边形，并按当前
+ * targetMode 决定它的 attachment：
+ *
+ *   - world  → addWorldShape：cartographic→world 转换，多边形悬浮在 SoonCPS
+ *              世界坐标系上方（worldHeight 米），编辑器立即进入编辑会话
+ *   - surface → addSurfaceShape：保留 cartographic 坐标，attachment 为 surface
+ *              的 terrain target——多边形会"贴地"在 Cesium 地形上
+ *   - tiles   → addModelShape：附着在 SoonCPS 模型瓦片上
+ *
+ * 高度统一来自 params.worldHeight（与"World height"滑块同源），用户拖动
+ * 滑块会实时改变 demo polygon 的高度（surface/tiles 模式下也有效，但视
+ * attachment 实现可能被覆盖为地表跟随）。
+ *
+ * @param {boolean} frameCamera 是否聚焦相机
+ */
+function addSingleEditDemoShape( frameCamera ) {
+
+	const cartoPolygon = buildSingleDemoCartographicPolygon();
+
+	let result;
+	if ( params.targetMode === 'tiles' ) {
+
+		result = addModelShape( cartoPolygon );
+
+	} else if ( params.targetMode === 'surface' ) {
+
+		result = addSurfaceShape( cartoPolygon );
+
+	} else {
+
+		// world 模式（默认）：cartographic → world frame meters，attachment.mode = 'world'
+		result = addWorldShape( cartographicShapeToWorldShape( cartoPolygon ) );
+
+	}
+
+	_singleDemoShapeId = result?.id ?? null;
+	plotEngine.invalidate();
+	plotEngine.update();
+	plotEngine.start();
+	demoGenerationProgress = null;
+
+	// Begin editing in every target mode; PlotEditor resolves the correct edit frame.
+	if ( _singleDemoShapeId != null && plotEditor ) {
+
+		plotEditor.beginEdit( _singleDemoShapeId );
+		const shape = plotEngine.shapeStore.get( _singleDemoShapeId );
+		if ( shape ) plotEditor._session?.handleLayer?.setSizeScale?.( getEditorHandleSizeScale( shape ) );
+
+	}
+
+	if ( frameCamera ) frameSoonModel();
+
+}
+
+/**
+ * 构造 single 模式的 cartographic 多边形（lon/lat 度数 + 高度米）。
+ * 多边形位于 SoonCPS 中心，宽约 50–70 米，呈不规则六边形，便于直观看到
+ * 顶点 / 中点 / 中心控制点。
+ */
+function buildSingleDemoCartographicPolygon() {
+
+	const altitude = Number( params.worldHeight ?? 300 ) || 0;
+	const lon = SOONSPACE_LON_DEG;
+	const lat = SOONSPACE_LAT_DEG;
+	// 0.0005 度 ≈ 55m 经度（在 ~33°N 处约 92km/deg），0.0005 度 ≈ 55m 纬度
+	const r = 0.0005;
+	return {
+		kind: 'polygon',
+		coordinates: [
+			[ lon - r, lat - r, altitude ],
+			[ lon + r, lat - r, altitude ],
+			[ lon + r * 1.4, lat, altitude ],
+			[ lon + r, lat + r, altitude ],
+			[ lon - r, lat + r, altitude ],
+			[ lon - r * 1.4, lat, altitude ],
+		],
+		style: {
+			fillColor: '#22d3ee',
+			strokeColor: '#ecfeff',
+			strokeWidth: 0,
+			opacity: 0.7,
+			altitude,
+		},
+	};
+
+}
+
+/**
+ * 把 single demo polygon 的所有顶点的 z 替换为新高度，走 plotEngine.updateShape
+ * 触发重编译。编辑会话存在时同步 working shape，避免 handle 与 hot mesh 错位。
+ *
+ * @param {number} altitude 新的高度（米）
+ * @returns {boolean} 是否更新了 shape
+ */
+function applySingleDemoShapeHeight( altitude ) {
+
+	if ( _singleDemoShapeId == null ) return false;
+	const shape = plotEngine.shapeStore.get( _singleDemoShapeId );
+	if ( ! shape ) return false;
+
+	const newCoordinates = ( shape.coordinates || [] ).map( point => [
+		point[ 0 ],
+		point[ 1 ],
+		altitude,
+	] );
+	const newStyle = { ...( shape.style || {} ), altitude };
+
+	plotEngine.updateShape( _singleDemoShapeId, {
+		coordinates: newCoordinates,
+		style: newStyle,
+	} );
+
+	// 同步当前编辑会话的 working / initial shape，让 handle 立即跟随新高度
+	if ( plotEditor?.editingShapeId === _singleDemoShapeId ) {
+
+		plotEditor._refreshSessionAfterExternalChange?.();
+
+	}
+
+	return true;
 
 }
 
@@ -1229,12 +1505,14 @@ function cancelDemoGeneration() {
 function clearDemoShapes() {
 
 	cancelDemoGeneration();
+	if ( plotEditor?.isEditing ) plotEditor.cancelEdit();
 	plotEngine.stop();
 	plotEngine.clearShapes();
 	worldShapeIds.length = 0;
 	localShapeIds.length = 0;
 	terrainShapeIds.length = 0;
 	modelShapeIds.length = 0;
+	_singleDemoShapeId = null;
 
 }
 
@@ -1459,7 +1737,18 @@ function randomizeLocalShapes() {
 
 function updateWorldHeight( value ) {
 
-	params.worldHeight = Number( value );
+	const altitude = Number( value ) || 0;
+	params.worldHeight = altitude;
+
+	// single 模式：只更新唯一 demo polygon 的 z，保留用户编辑过的形状
+	if ( params.demoMode === 'single' && _singleDemoShapeId != null ) {
+
+		const updated = applySingleDemoShapeHeight( altitude );
+		if ( updated ) return;
+
+	}
+
+	// random 模式 / single 模式但没有现存 shape：走重置路径
 	resetShapes( { frameCamera: false } );
 
 }
@@ -1493,6 +1782,9 @@ function setupGui() {
 
 			plotEngine.setMode( mode );
 			requestConditionalTilesUpdates();
+			// 始终重建 demo shape，让 single 模式也能根据 targetMode 切换 attachment
+			// （world / surface / tiles 三种 attachment 视觉差别明显——
+			//   world：悬浮在 SoonCPS 上空；surface：贴 Cesium 地形；tiles：贴 SoonCPS 模型）
 			resetShapes( { frameCamera: false } );
 
 		} );
@@ -1501,6 +1793,12 @@ function setupGui() {
 	gui.add( params, 'showSoonModel' ).name( 'Show SoonCPS model' ).onChange( reinstantiateModelTiles );
 	gui.add( params, 'localOpacity', 0.1, 1, 0.05 ).name( 'Local opacity' ).onChange( updateLocalOpacity );
 	gui.add( params, 'worldHeight', - 2000, 10000, 10 ).name( 'World height' ).onChange( updateWorldHeight );
+	gui.add( params, 'demoMode', {
+		'Single (editable)': 'single',
+		'Random (stress)': 'random',
+	} )
+		.name( 'Demo mode' )
+		.onChange( () => resetShapes( { frameCamera: true } ) );
 	gui.add( params, 'demoPlotCount', {
 		100: 100,
 		500: 500,
@@ -1528,6 +1826,17 @@ function setupGui() {
 	const soonFolder = gui.addFolder( 'SoonCPS 3D Tiles' );
 	soonFolder.add( params, 'soonModelVisible' ).name( 'Visible' ).onChange( updateSoonModelVisibility );
 	soonFolder.add( params, 'reloadSoonModel' ).name( 'Reload model' );
+
+	const editorFolder = gui.addFolder( 'Editor' );
+	editorFolder.add( params, 'editorEndEdit' ).name( 'End edit (commit)' );
+	editorFolder.add( params, 'editorCancelEdit' ).name( 'Cancel edit' );
+	editorFolder.add( params, 'editorDeselect' ).name( 'Deselect' );
+	editorUndoController = editorFolder.add( params, 'editorUndo' ).name( 'Undo' );
+	editorRedoController = editorFolder.add( params, 'editorRedo' ).name( 'Redo' );
+	editorStatusController = editorFolder.add( params, 'editorStatus' ).name( 'Status' ).disable();
+	editorFolder.open();
+
+	refreshEditorGui();
 
 }
 

@@ -147,6 +147,28 @@ export class TiledPipe {
 		this.rasterTextureSize = options.rasterTextureSize ?? 512;
 		this._loadedTiles = new Map();
 		this._tileIndices = new Map();
+		this._hiddenShapeIds = new Set();
+
+	}
+
+	setShapeHidden( shapeId, hidden = true ) {
+
+		if ( shapeId == null ) return this;
+		const wasHidden = this._hiddenShapeIds.has( shapeId );
+		if ( hidden ) {
+
+			if ( wasHidden ) return this;
+			this._hiddenShapeIds.add( shapeId );
+
+		} else {
+
+			if ( ! wasHidden ) return this;
+			this._hiddenShapeIds.delete( shapeId );
+
+		}
+
+		this._rebuildTilesForShape( shapeId );
+		return this;
 
 	}
 
@@ -318,7 +340,9 @@ export class TiledPipe {
 		const boundsChanged = ! sameBounds( entry.bounds, bounds );
 		if ( boundsChanged ) this._updateTileBounds( targetId, entry, bounds );
 
-		const compiledShapes = this.engine._queryCompiledForTarget( targetId, entry.bounds, [ 'tiles', 'surface' ] );
+		const compiledShapes = this.engine
+			._queryCompiledForTarget( targetId, entry.bounds, [ 'tiles', 'surface' ] )
+			.filter( compiled => ! this._hiddenShapeIds.has( compiled.id ) );
 		if ( compiledShapes.length === 0 ) {
 
 
@@ -505,6 +529,26 @@ export class TiledPipe {
 				dirtyTiles.add( entry.tile );
 
 			}
+
+		}
+
+	}
+
+	_rebuildTilesForShape( shapeId ) {
+
+		const compiled = this.engine._compiledShapeMap?.get?.( shapeId ) || null;
+		if ( ! compiled ) {
+
+			this.refreshAll();
+			return;
+
+		}
+
+		const dirtyTilesByTarget = new Map();
+		this._markDirtyTilesForCompiled( compiled, Array.from( this._loadedTiles.keys() ), dirtyTilesByTarget );
+		for ( const [ targetId, entryKeys ] of dirtyTilesByTarget ) {
+
+			for ( const entryKey of entryKeys ) this.rebuildEntry( targetId, entryKey, { force: true } );
 
 		}
 

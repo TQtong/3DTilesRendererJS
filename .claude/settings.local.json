@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(npx vitest *)",
-      "Bash(timeout 60 npx vite build --config ./vite.config.js)"
+      "Bash(timeout 60 npx vite build --config ./vite.config.js)",
+      "Bash(npm run *)",
+      "Bash(node --check \"example/three/plotEngine.js\")"
     ]
   }
 }

@@ -154,3 +154,214 @@ export class PlotEngine {
 }
 
 export function createTilesRendererTargetAdapter(): SurfaceTargetAdapter;
+
+// ── Editor 层（PlotEngine 之上的可选编辑能力） ──────────────
+
+export type EditableHandleType = 'vertex' | 'midpoint' | 'center' | 'radius' | 'angle' | 'width';
+
+export interface EditableHandle {
+	id: string;
+	type: EditableHandleType;
+	position: PlotCoordinate;
+	meta?: Record<string, any>;
+}
+
+export interface ShapeEditPatch {
+	coordinates?: PlotCoordinate[];
+	style?: Record<string, any>;
+	insertedIndex?: number;
+	removedIndex?: number;
+}
+
+export interface ShapeEditAdapter {
+	kind: string;
+	getEditableHandles( shape: PlotShape ): EditableHandle[];
+	applyHandleDrag( shape: PlotShape, handleId: string, point: PlotCoordinate ): ShapeEditPatch | null;
+	canRemoveVertex( shape: PlotShape, handleId: string ): boolean;
+	removeVertex( shape: PlotShape, handleId: string ): ShapeEditPatch | null;
+	getInsertableEdges( shape: PlotShape ): Array<{ id: string; insertIndex: number; a: PlotCoordinate; b: PlotCoordinate }>;
+	insertVertex( shape: PlotShape, handleId: string, point: PlotCoordinate ): ShapeEditPatch | null;
+	getCenter( shape: PlotShape ): PlotCoordinate;
+	translate( shape: PlotShape, dx: number, dy: number ): ShapeEditPatch;
+}
+
+export const HANDLE_VERTEX: 'vertex';
+export const HANDLE_MIDPOINT: 'midpoint';
+export const HANDLE_CENTER: 'center';
+export const HANDLE_RADIUS: 'radius';
+export const HANDLE_ANGLE: 'angle';
+export const HANDLE_WIDTH: 'width';
+
+export function getShapeEditAdapter( kind: string ): ShapeEditAdapter | null;
+export function registerShapeEditAdapter( kind: string, adapter: ShapeEditAdapter ): void;
+
+export class BaseCommand {
+	kind: string;
+	shapeId: string | number | null;
+	timestamp: number;
+	do( context: any ): boolean;
+	undo( context: any ): boolean;
+	merge( other: BaseCommand, options?: any ): BaseCommand | null;
+	toJSON(): Record<string, any>;
+}
+
+export function cloneCoordinates( coordinates: PlotCoordinate[] ): PlotCoordinate[];
+export function cloneStyle( style: Record<string, any> ): Record<string, any>;
+
+export class UpdateCoordinatesCommand extends BaseCommand {
+	constructor( shapeId: string | number, beforeCoords: PlotCoordinate[], afterCoords: PlotCoordinate[], options?: { coalesceWithPrevious?: boolean; coalesceWindowMs?: number } );
+	readonly beforeCoordinates: PlotCoordinate[];
+	readonly afterCoordinates: PlotCoordinate[];
+}
+
+export class InsertVertexCommand extends BaseCommand {
+	constructor( shapeId: string | number, insertIndex: number, point: PlotCoordinate, beforeCoords: PlotCoordinate[] );
+	readonly insertedIndex: number;
+	readonly insertedPoint: PlotCoordinate;
+	readonly afterCoordinates: PlotCoordinate[];
+}
+
+export class RemoveVertexCommand extends BaseCommand {
+	constructor( shapeId: string | number, removeIndex: number, beforeCoords: PlotCoordinate[] );
+	readonly removedIndex: number;
+	readonly removedPoint: PlotCoordinate | null;
+}
+
+export class TranslateShapeCommand extends BaseCommand {
+	constructor( shapeId: string | number, dx: number, dy: number, dz?: number, options?: { coalesceWindowMs?: number } );
+	readonly deltaX: number;
+	readonly deltaY: number;
+	readonly deltaZ: number;
+}
+
+export class BatchCommand extends BaseCommand {
+	constructor( commands: BaseCommand[], label?: string );
+	readonly commands: BaseCommand[];
+	readonly label: string;
+}
+
+export interface EditorHistoryChangePayload {
+	canUndo: boolean;
+	canRedo: boolean;
+	lastCommand: BaseCommand | null;
+	undoSize: number;
+	redoSize: number;
+}
+
+export class EditorHistory {
+	constructor( options?: { capacity?: number; autoCoalesce?: boolean } );
+	enabled: boolean;
+	readonly canUndo: boolean;
+	readonly canRedo: boolean;
+	readonly undoSize: number;
+	readonly redoSize: number;
+	setContext( context: { shapeStore: ShapeStore; plotEngine: PlotEngine; editor?: PlotEditor } ): void;
+	execute( command: BaseCommand ): boolean;
+	undo(): boolean;
+	redo(): boolean;
+	clear(): void;
+	getStackSnapshot(): { undo: any[]; redo: any[] };
+	addEventListener( event: 'change' | 'execute' | 'undo' | 'redo', callback: ( payload: any ) => void ): void;
+	removeEventListener( event: string, callback: ( payload: any ) => void ): void;
+}
+
+export class HandleLayer {
+	constructor( options?: { sizeScale?: number; maxInstances?: number } );
+	readonly group: Group;
+	setSizeScale( scale: number ): void;
+	updateHandles( handles: EditableHandle[] ): void;
+	updateOutline( kind: string, shape: PlotShape ): void;
+	setHovered( target: { type: string; instanceId: number } | null ): void;
+	resolveHit( hitMesh: any, instanceId: number ): { type: string; handleId: string; instanceId: number } | null;
+	getRaycastTargets(): any[];
+	dispose(): void;
+}
+
+export class DragController {
+	constructor( options: {
+		domElement: HTMLElement;
+		camera: any;
+		workingFrame: any;
+		callbacks: {
+			onHandleHover?: ( handle: any ) => void;
+			onDragStart?: ( handle: any, kind: string ) => void;
+			onDragMove?: ( handle: any, localPoint: number[] ) => void;
+			onDragEnd?: ( handle: any, kind: string ) => void;
+			onInsertVertex?: ( handle: any, localPoint: number[] ) => string | null | undefined;
+			onRemoveVertex?: ( handle: any ) => void;
+		};
+	} );
+	setHandleLayer( layer: HandleLayer | null ): void;
+	setWorkingFrame( frame: any ): void;
+	enable(): void;
+	disable(): void;
+	dispose(): void;
+}
+
+export class EditSession {
+	constructor( options: { plotEngine: PlotEngine; shapeId: string | number; mountGroup: any; handleSizeScale?: number } );
+	readonly shapeId: string | number;
+	readonly workingShape: PlotShape;
+	readonly adapter: ShapeEditAdapter;
+	readonly handleLayer: HandleLayer;
+	readonly sessionGroup: any;
+	setWorkingPatch( patch: ShapeEditPatch ): void;
+	setWorkingShape( shape: PlotShape ): void;
+	invalidate(): void;
+	flushIfDirty(): void;
+	computeDiff(): {
+		beforeCoordinates: PlotCoordinate[];
+		afterCoordinates: PlotCoordinate[];
+		beforeStyle: Record<string, any>;
+		afterStyle: Record<string, any>;
+		coordinatesChanged: boolean;
+		styleChanged: boolean;
+	};
+	refreshColdHiding(): void;
+	dispose(): void;
+}
+
+export interface PlotEditorOptions {
+	plotEngine: PlotEngine;
+	camera: any;
+	renderer: { domElement: HTMLElement };
+	maxHistory?: number;
+	autoCoalesce?: boolean;
+	autoStart?: boolean;
+	handleSizeScale?: number;
+	selectionStyle?: { color?: number; opacity?: number; lineWidth?: number };
+}
+
+export type PlotEditorEvent =
+	| 'selection-change'
+	| 'edit-begin'
+	| 'edit-commit'
+	| 'edit-end'
+	| 'edit-cancel'
+	| 'history-change'
+	| 'drag-start'
+	| 'drag-end'
+	| 'handle-hover';
+
+export class PlotEditor {
+	constructor( options: PlotEditorOptions );
+	readonly history: EditorHistory;
+	readonly canUndo: boolean;
+	readonly canRedo: boolean;
+	readonly selectedShapeId: string | number | null;
+	readonly isEditing: boolean;
+	readonly editingShapeId: string | number | null;
+	start(): void;
+	stop(): void;
+	select( shapeId: string | number ): boolean;
+	deselect(): void;
+	beginEdit( shapeId: string | number ): boolean;
+	endEdit(): boolean;
+	cancelEdit(): boolean;
+	executeCommand( command: BaseCommand ): boolean;
+	undo(): boolean;
+	redo(): boolean;
+	addEventListener( event: PlotEditorEvent, callback: ( payload: any ) => void ): void;
+	removeEventListener( event: PlotEditorEvent, callback: ( payload: any ) => void ): void;
+	dispose(): void;
+}
