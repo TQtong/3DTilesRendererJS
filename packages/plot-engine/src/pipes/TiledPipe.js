@@ -895,9 +895,45 @@ export class TiledPipe {
 
 		}
 
+		// 军标箭头家族：编译器输出的 primitives[0].points 是多边形外轮廓
+		if (
+			kind === 'arrow-fine' ||
+			kind === 'arrow-swallowtail' ||
+			kind === 'arrow-curved' ||
+			kind === 'arrow-attack' ||
+			kind === 'arrow-tailed-attack' ||
+			kind === 'arrow-double' ||
+			kind === 'gathering-place'
+		) {
+
+			const polygonPrim = ( compiled.primitives || [] ).find( prim => prim.kind === 'polygon' );
+			if ( polygonPrim?.points ) {
+
+				return polygonPrim.points.map( point => [ point[ 0 ], point[ 1 ] ] );
+
+			}
+
+			return coords.map( point => [ point[ 0 ], point[ 1 ] ] );
+
+		}
+
 		if ( kind === 'line' || kind === 'polyline' || kind === 'point' ) {
 
 			return null; // 这些 kind 不构成多边形 fill；走单独路径
+
+		}
+
+		// thick line / dashed / flow → null（走 line 路径）
+		if ( kind === 'line-thick' || kind === 'line-dashed' || kind === 'line-flow' ) {
+
+			return null;
+
+		}
+
+		// 文本 / 图标：不参与 tile-attached fill，走单独路径
+		if ( kind === 'text-label' || kind === 'text-leader' || kind === 'icon' || kind === 'milsymbol' ) {
+
+			return null;
 
 		}
 

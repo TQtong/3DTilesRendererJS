@@ -731,6 +731,158 @@ const arrowAdapter = {
 
 };
 
+// ── 双箭头/钳形（4 控制点固定）────────────────────────────────
+const doubleArrowAdapter = {
+
+	kind: 'arrow-double',
+
+	getEditableHandles( shape ) {
+
+		const coords = shape.coordinates || [];
+		const handles = [];
+		for ( let index = 0; index < coords.length; index ++ ) {
+
+			handles.push( {
+				id: `vertex:${ index }`,
+				type: HANDLE_VERTEX,
+				position: copyPoint( coords[ index ] ),
+				meta: { vertexIndex: index },
+			} );
+
+		}
+
+		if ( coords.length > 0 ) {
+
+			handles.push( {
+				id: 'center',
+				type: HANDLE_CENTER,
+				position: arithmeticCenter( coords ),
+				meta: {},
+			} );
+
+		}
+
+		return handles;
+
+	},
+
+	applyHandleDrag( shape, handleId, point ) {
+
+		const coords = ( shape.coordinates || [] ).map( copyPoint );
+		if ( handleId.startsWith( 'vertex:' ) ) {
+
+			const index = Number( handleId.slice( 7 ) );
+			if ( index < 0 || index >= coords.length ) return null;
+			const z = coords[ index ][ 2 ];
+			coords[ index ] = z !== undefined
+				? [ point[ 0 ], point[ 1 ], z ]
+				: [ point[ 0 ], point[ 1 ] ];
+			return { coordinates: coords };
+
+		}
+
+		if ( handleId === 'center' ) {
+
+			const center = arithmeticCenter( coords );
+			const dx = point[ 0 ] - center[ 0 ];
+			const dy = point[ 1 ] - center[ 1 ];
+			return { coordinates: translateCoords( coords, dx, dy ) };
+
+		}
+
+		return null;
+
+	},
+
+	canRemoveVertex() { return false; },
+	removeVertex() { return null; },
+	getInsertableEdges() { return []; },
+	insertVertex() { return null; },
+
+	getCenter( shape ) {
+
+		return arithmeticCenter( shape.coordinates || [] );
+
+	},
+
+	translate( shape, dx, dy ) {
+
+		return { coordinates: translateCoords( shape.coordinates || [], dx, dy ) };
+
+	},
+
+};
+
+// ── 单纯锚点 + 一个尺寸 handle 的通用适配（icon / text）─────────
+
+const anchorWithSizeAdapter = {
+
+	kind: 'icon',
+
+	getEditableHandles( shape ) {
+
+		const coords = shape.coordinates || [];
+		if ( coords.length === 0 ) return [];
+		const anchor = copyPoint( coords[ 0 ] );
+		const width = Number( shape.style?.width ?? 1 );
+		const z = anchor[ 2 ];
+		const widthHandle = z !== undefined
+			? [ anchor[ 0 ] + width * 0.5, anchor[ 1 ], z ]
+			: [ anchor[ 0 ] + width * 0.5, anchor[ 1 ] ];
+		return [
+			{ id: 'center', type: HANDLE_CENTER, position: anchor, meta: {} },
+			{ id: 'width', type: HANDLE_WIDTH, position: widthHandle, meta: {} },
+		];
+
+	},
+
+	applyHandleDrag( shape, handleId, point ) {
+
+		const anchor = shape.coordinates?.[ 0 ];
+		if ( ! anchor ) return null;
+		if ( handleId === 'center' ) {
+
+			const z = anchor[ 2 ];
+			return {
+				coordinates: [ z !== undefined
+					? [ point[ 0 ], point[ 1 ], z ]
+					: [ point[ 0 ], point[ 1 ] ] ],
+			};
+
+		}
+
+		if ( handleId === 'width' ) {
+
+			const dx = point[ 0 ] - anchor[ 0 ];
+			const dy = point[ 1 ] - anchor[ 1 ];
+			const length = Math.hypot( dx, dy );
+			return { style: { width: length * 2, height: length * 2 } };
+
+		}
+
+		return null;
+
+	},
+
+	canRemoveVertex() { return false; },
+	removeVertex() { return null; },
+	getInsertableEdges() { return []; },
+	insertVertex() { return null; },
+
+	getCenter( shape ) {
+
+		return copyPoint( shape.coordinates?.[ 0 ] || [ 0, 0 ] );
+
+	},
+
+	translate( shape, dx, dy ) {
+
+		return { coordinates: translateCoords( shape.coordinates || [], dx, dy ) };
+
+	},
+
+};
+
 // ── 注册表 ──────────────────────────────────────────────────
 
 const _registry = new Map();
@@ -742,6 +894,27 @@ _registry.set( 'rectangle', rectangleAdapter );
 _registry.set( 'circle', circleAdapter );
 _registry.set( 'sector', sectorAdapter );
 _registry.set( 'arrow', arrowAdapter );
+
+// ── 新增 kind 的 adapter 注册 ────────────────────────────────
+// 军标箭头（任意控制点）→ 复用 polyline 的 vertex chain
+_registry.set( 'arrow-fine', arrowAdapter );
+_registry.set( 'arrow-swallowtail', arrowAdapter );
+_registry.set( 'arrow-curved', makeVertexChainAdapter( { kind: 'arrow-curved', closed: false, minVertices: 2 } ) );
+_registry.set( 'arrow-attack', makeVertexChainAdapter( { kind: 'arrow-attack', closed: false, minVertices: 3 } ) );
+_registry.set( 'arrow-tailed-attack', makeVertexChainAdapter( { kind: 'arrow-tailed-attack', closed: false, minVertices: 3 } ) );
+_registry.set( 'arrow-double', doubleArrowAdapter );
+_registry.set( 'gathering-place', makeVertexChainAdapter( { kind: 'gathering-place', closed: true, minVertices: 3 } ) );
+
+// 厚线 / 虚线 / 流光线（同 polyline）
+_registry.set( 'line-thick', makeVertexChainAdapter( { kind: 'line-thick', closed: false, minVertices: 2 } ) );
+_registry.set( 'line-dashed', makeVertexChainAdapter( { kind: 'line-dashed', closed: false, minVertices: 2 } ) );
+_registry.set( 'line-flow', makeVertexChainAdapter( { kind: 'line-flow', closed: false, minVertices: 2 } ) );
+
+// 文本与图标（锚点 + 尺寸 handle）
+_registry.set( 'text-label', anchorWithSizeAdapter );
+_registry.set( 'text-leader', anchorWithSizeAdapter );
+_registry.set( 'icon', anchorWithSizeAdapter );
+_registry.set( 'milsymbol', anchorWithSizeAdapter );
 
 /**
  * 取出指定 kind 的 adapter；找不到返回 null。

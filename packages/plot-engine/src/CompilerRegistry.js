@@ -1,4 +1,7 @@
 import { registerDefaultCompilers } from './compilers/defaultCompilers.js';
+import { registerMilitaryArrowCompilers } from './compilers/militaryArrowCompilers.js';
+import { registerTextCompiler } from './compilers/textCompiler.js';
+import { registerIconCompiler } from './compilers/iconCompiler.js';
 
 export class CompilerRegistry {
 
@@ -9,6 +12,9 @@ export class CompilerRegistry {
 		if ( options.defaultCompilers !== false ) {
 
 			registerDefaultCompilers( this );
+			registerMilitaryArrowCompilers( this );
+			registerTextCompiler( this );
+			registerIconCompiler( this );
 
 		}
 

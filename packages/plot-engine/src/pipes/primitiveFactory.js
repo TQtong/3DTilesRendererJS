@@ -15,10 +15,62 @@ import {
 	ShapeUtils,
 	Vector2,
 } from 'three';
+import { createThickLineMesh, ThickLineMaterialPool } from './ThickLineMaterial.js';
+import {
+	createTextMesh,
+	createIconMesh,
+	createLeaderLineMesh,
+	disposeSpriteMesh,
+} from './SpriteFactory.js';
 
 const noopRaycast = () => {};
 const WORLD_POLYGON_OFFSET_FACTOR = 1;
 const WORLD_POLYGON_OFFSET_UNITS = 1;
+
+const MILITARY_ARROW_POLYGON_KINDS = new Set( [
+	'arrow-fine',
+	'arrow-swallowtail',
+	'arrow-curved',
+	'arrow-attack',
+	'arrow-tailed-attack',
+	'arrow-double',
+	'gathering-place',
+] );
+
+const POLYGON_KINDS = new Set( [
+	'polygon',
+	'rectangle',
+	'circle',
+	'sector',
+	'arrow',
+	...MILITARY_ARROW_POLYGON_KINDS,
+] );
+
+const THICK_LINE_KINDS = new Set( [
+	'line-thick',
+	'line-dashed',
+	'line-flow',
+] );
+
+const TEXT_KINDS = new Set( [ 'text-label', 'text-leader' ] );
+const ICON_KINDS = new Set( [ 'icon', 'milsymbol' ] );
+
+function getPrecomputedPolygonPoints( compiled ) {
+
+	const primitives = compiled.primitives || [];
+	const polygonPrim = primitives.find( prim => prim.kind === 'polygon' );
+	if ( ! polygonPrim ) return null;
+	if ( polygonPrim.points3D ) return polygonPrim.points3D;
+	return polygonPrim.points || null;
+
+}
+
+function getAllPrecomputedPolygonPrimitives( compiled ) {
+
+	const primitives = compiled.primitives || [];
+	return primitives.filter( prim => prim.kind === 'polygon' );
+
+}
 
 export class PrimitiveMaterialPool {
 
@@ -259,38 +311,75 @@ function makePolygonPoints( compiled ) {
 
 	}
 
+	// 军标箭头家族 / gathering-place：编译器预计算了多边形顶点
+	const precomputed = getPrecomputedPolygonPoints( compiled );
+	if ( precomputed ) {
+
+		return precomputed.map( point => [ point[ 0 ], point[ 1 ] ] );
+
+	}
+
 	return ( compiled.shape.coordinates || [] ).map( point => [ point[ 0 ], point[ 1 ] ] );
 
 }
 
 function makeHeightAwarePolygonGeometry( compiled ) {
 
-	if ( compiled.kind !== 'polygon' ) return null;
+	const isPolygonLike = compiled.kind === 'polygon' || MILITARY_ARROW_POLYGON_KINDS.has( compiled.kind );
+	if ( ! isPolygonLike ) return null;
 
-	const coordinates = compiled.shape.coordinates || [];
-	if ( coordinates.length < 3 ) return null;
+	// 军标箭头：编译器输出的 primitives 中每个 polygon 都是一条独立外环
+	const polygonPrimitives = getAllPrecomputedPolygonPrimitives( compiled );
 
-	const hasHeights = coordinates.every( point => point.length > 2 && Number.isFinite( Number( point[ 2 ] ) ) );
-	if ( ! hasHeights ) return null;
+	const buildPositionsForRing = ( ring ) => {
 
-	const contour = coordinates.map( point => new Vector2( point[ 0 ], point[ 1 ] ) );
-	const triangles = ShapeUtils.triangulateShape( contour, [] );
-	if ( triangles.length === 0 ) return null;
+		if ( ! ring || ring.length < 3 ) return null;
+		const hasHeights = ring.every( point => point.length > 2 && Number.isFinite( Number( point[ 2 ] ) ) );
+		if ( ! hasHeights ) return null;
+		const contour = ring.map( point => new Vector2( point[ 0 ], point[ 1 ] ) );
+		const triangles = ShapeUtils.triangulateShape( contour, [] );
+		if ( triangles.length === 0 ) return null;
+		const positions = [];
+		for ( const triangle of triangles ) {
 
-	const positions = [];
-	for ( const triangle of triangles ) {
+			for ( const index of triangle ) {
 
-		for ( const index of triangle ) {
+				const point = ring[ index ];
+				positions.push( point[ 0 ], getHeight( compiled, point ), point[ 1 ] );
 
-			const point = coordinates[ index ];
-			positions.push( point[ 0 ], getHeight( compiled, point ), point[ 1 ] );
+			}
 
 		}
 
+		return positions;
+
+	};
+
+	const allPositions = [];
+
+	if ( polygonPrimitives.length > 0 ) {
+
+		// 多多边形（如 doubleArrow）→ 各自三角化后合并
+		for ( const prim of polygonPrimitives ) {
+
+			const ring = prim.points3D || prim.points;
+			const positions = buildPositionsForRing( ring );
+			if ( positions ) allPositions.push( ...positions );
+
+		}
+
+	} else {
+
+		// 走 shape.coordinates 的兼容路径
+		const positions = buildPositionsForRing( compiled.shape.coordinates || [] );
+		if ( positions ) allPositions.push( ...positions );
+
 	}
 
+	if ( allPositions.length === 0 ) return null;
+
 	const geometry = new BufferGeometry();
-	geometry.setAttribute( 'position', new Float32BufferAttribute( positions, 3 ) );
+	geometry.setAttribute( 'position', new Float32BufferAttribute( allPositions, 3 ) );
 	geometry.computeBoundingBox?.();
 	geometry.computeBoundingSphere?.();
 	return geometry;
@@ -348,27 +437,100 @@ function makePolygonObject( compiled ) {
 
 }
 
-export function createPrimitiveObject( compiled ) {
+function makeThickLineObject( compiled, thickLineMaterialPool ) {
+
+	const coords = compiled.shape.coordinates || [];
+	if ( coords.length < 2 ) return null;
+	const points = coords.map( point => {
+
+		const x = Number( point[ 0 ] );
+		const y = Number( point[ 1 ] );
+		const z = getHeight( compiled, point );
+		return [ x, z, y ];
+
+	} );
+
+	return createThickLineMesh( {
+		points,
+		kind: compiled.kind,
+		style: compiled.style || {},
+		strokeColor: compiled.sdf?.style?.stroke,
+		opacity: compiled.sdf?.style?.opacity ?? 1,
+		materialPool: thickLineMaterialPool,
+	} );
+
+}
+
+function makeTextObject( compiled ) {
+
+	const group = new Group();
+	group.name = `PlotEngine.Text.${ compiled.id }`;
+	const primitives = compiled.primitives || [];
+	for ( const prim of primitives ) {
+
+		if ( prim.kind === 'text' ) {
+
+			const mesh = createTextMesh( prim );
+			if ( mesh ) group.add( mesh );
+
+		} else if ( prim.kind === 'text-leader-line' ) {
+
+			const mesh = createLeaderLineMesh( prim );
+			if ( mesh ) group.add( mesh );
+
+		}
+
+	}
+
+	return group.children.length > 0 ? group : null;
+
+}
+
+function makeIconObject( compiled ) {
+
+	const primitives = compiled.primitives || [];
+	const iconPrim = primitives.find( prim => prim.kind === 'icon' );
+	if ( ! iconPrim ) return null;
+	return createIconMesh( iconPrim );
+
+}
+
+export function createPrimitiveObject( compiled, options = {} ) {
 
 	let object = null;
-	switch ( compiled.kind ) {
+	const thickLineMaterialPool = options.thickLineMaterialPool ?? null;
 
-		case 'point':
-			object = makePointObject( compiled );
-			break;
-		case 'line':
-		case 'polyline':
-			object = makeLineObject( compiled );
-			break;
-		case 'polygon':
-		case 'rectangle':
-		case 'circle':
-		case 'sector':
-		case 'arrow':
-			object = makePolygonObject( compiled );
-			break;
-		default:
-			object = null;
+	if ( THICK_LINE_KINDS.has( compiled.kind ) ) {
+
+		object = makeThickLineObject( compiled, thickLineMaterialPool );
+
+	} else if ( TEXT_KINDS.has( compiled.kind ) ) {
+
+		object = makeTextObject( compiled );
+
+	} else if ( ICON_KINDS.has( compiled.kind ) ) {
+
+		object = makeIconObject( compiled );
+
+	} else if ( POLYGON_KINDS.has( compiled.kind ) ) {
+
+		object = makePolygonObject( compiled );
+
+	} else {
+
+		switch ( compiled.kind ) {
+
+			case 'point':
+				object = makePointObject( compiled );
+				break;
+			case 'line':
+			case 'polyline':
+				object = makeLineObject( compiled );
+				break;
+			default:
+				object = null;
+
+		}
 
 	}
 
@@ -450,8 +612,45 @@ export function createBatchedPrimitiveGroup( compiledShapes, options = {} ) {
 	const group = new Group();
 	const batches = new Map();
 	const materialPool = options.materialPool ?? null;
+	const thickLineMaterialPool = options.thickLineMaterialPool ?? null;
+	// 厚线 / 流光线、Atlas 通道：暂不参与 batch 合并（它们各自是独立 InstancedMesh / Mesh）
+	const standaloneObjects = [];
 
 	for ( const compiled of compiledShapes ) {
+
+		if ( THICK_LINE_KINDS.has( compiled.kind ) ) {
+
+			const object = makeThickLineObject( compiled, thickLineMaterialPool );
+			if ( object ) standaloneObjects.push( object );
+			continue;
+
+		}
+
+		if ( TEXT_KINDS.has( compiled.kind ) ) {
+
+			const object = makeTextObject( compiled );
+			if ( object ) standaloneObjects.push( object );
+			continue;
+
+		}
+
+		if ( ICON_KINDS.has( compiled.kind ) ) {
+
+			const object = makeIconObject( compiled );
+			if ( object ) standaloneObjects.push( object );
+			continue;
+
+		}
+
+		if ( POLYGON_KINDS.has( compiled.kind ) ) {
+
+			const geometry = createPolygonGeometry( compiled );
+			if ( ! geometry ) continue;
+			const batch = getOrCreateBatch( batches, 'meshes', getPolygonMaterialState( compiled ), materialPool );
+			batch.geometries.push( geometry );
+			continue;
+
+		}
 
 		switch ( compiled.kind ) {
 
@@ -469,19 +668,6 @@ export function createBatchedPrimitiveGroup( compiledShapes, options = {} ) {
 				if ( positions.length === 0 ) break;
 				const batch = getOrCreateBatch( batches, 'lines', getLineMaterialState( compiled ), materialPool );
 				batch.positions.push( ...positions );
-				break;
-
-			}
-			case 'polygon':
-			case 'rectangle':
-			case 'circle':
-			case 'sector':
-			case 'arrow': {
-
-				const geometry = createPolygonGeometry( compiled );
-				if ( ! geometry ) break;
-				const batch = getOrCreateBatch( batches, 'meshes', getPolygonMaterialState( compiled ), materialPool );
-				batch.geometries.push( geometry );
 				break;
 
 			}
@@ -522,6 +708,13 @@ export function createBatchedPrimitiveGroup( compiledShapes, options = {} ) {
 
 	}
 
+	for ( const object of standaloneObjects ) {
+
+		object.raycast = noopRaycast;
+		group.add( object );
+
+	}
+
 	group.userData.plotMaterialKeys = materialKeys;
 	return group;
 
@@ -533,8 +726,14 @@ export function disposeObjectTree( root, options = {} ) {
 
 	root.traverse?.( child => {
 
+		// Sprite mesh 自带的 disposable 列表
+		if ( child.userData?._disposable ) disposeSpriteMesh( child );
 		child.geometry?.dispose?.();
 		if ( ! disposeMaterials ) return;
+		// thick-line / sprite 共享的材质由 pool 管理；不在此 dispose
+		if ( child.userData?.plotKind === 'line-thick' ||
+			child.userData?.plotKind === 'line-dashed' ||
+			child.userData?.plotKind === 'line-flow' ) return;
 		if ( Array.isArray( child.material ) ) {
 
 			child.material.forEach( material => material?.dispose?.() );

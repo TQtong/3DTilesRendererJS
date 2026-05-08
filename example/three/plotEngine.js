@@ -64,7 +64,61 @@ const TOUCH_GROUND_ARROW_WIDTH = 5000;
 const TOUCH_GROUND_ARROW_HEAD_LENGTH = 12000;
 const LOCAL_EDITOR_HANDLE_SIZE = 0.6;
 const CONDITIONAL_TILE_UPDATE_FRAMES = 45;
-const DEMO_SHAPE_COUNT = 8;
+const DEMO_SHAPE_COUNT = 21;
+// 军标 / 多控制点箭头 demo 控制点（5 控制点验证 attackArrow 在 N≥4 下的稳定性）
+const TOUCH_GROUND_ATTACK_POINTS = [
+	[ 100.30, 22.40 ],
+	[ 100.42, 22.45 ],
+	[ 100.48, 22.55 ],
+	[ 100.55, 22.62 ],
+	[ 100.62, 22.50 ],
+];
+const TOUCH_GROUND_CURVED_POINTS = [
+	[ 100.30, 22.30 ],
+	[ 100.40, 22.36 ],
+	[ 100.50, 22.32 ],
+	[ 100.60, 22.40 ],
+];
+const TOUCH_GROUND_TAILED_POINTS = [
+	[ 100.20, 22.20 ],
+	[ 100.30, 22.18 ],
+	[ 100.40, 22.10 ],
+	[ 100.50, 22.20 ],
+];
+const TOUCH_GROUND_DOUBLE_POINTS = [
+	[ 100.05, 22.05 ],
+	[ 100.20, 22.05 ],
+	[ 100.18, 22.18 ],
+	[ 100.07, 22.18 ],
+];
+const TOUCH_GROUND_GATHERING_POINTS = [
+	[ 100.85, 22.40 ],
+	[ 101.00, 22.45 ],
+	[ 100.98, 22.60 ],
+	[ 100.78, 22.55 ],
+];
+const TOUCH_GROUND_THICK_LINE_POINTS = [
+	[ 100.10, 22.85 ],
+	[ 100.30, 22.90 ],
+	[ 100.50, 22.85 ],
+];
+const TOUCH_GROUND_DASHED_LINE_POINTS = [
+	[ 100.10, 22.78 ],
+	[ 100.50, 22.78 ],
+];
+const TOUCH_GROUND_FLOW_LINE_POINTS = [
+	[ 100.10, 22.72 ],
+	[ 100.30, 22.72 ],
+	[ 100.50, 22.72 ],
+];
+const TOUCH_GROUND_TEXT_LABEL_POINT = [ 100.30, 23.05 ];
+const TOUCH_GROUND_TEXT_LEADER_ANCHOR = [ 100.55, 23.05 ];
+const TOUCH_GROUND_TEXT_LEADER_TARGET = [ 100.55, 22.95 ];
+const TOUCH_GROUND_ICON_POINT = [ 101.10, 22.30 ];
+const TOUCH_GROUND_FINE_ARROW_POINTS = [
+	[ 100.20, 22.95 ],
+	[ 100.45, 22.95 ],
+];
 const TOUCH_GROUND_LINE_POINTS = [
 	[ 119.99552468061438, 29.98779678449977 ],
 	[ 119.99580048686205, 29.988238416209864 ],
@@ -157,6 +211,22 @@ const shapeIds = {
 	sectorId: null,
 	circleId: null,
 	arrowId: null,
+	// 军标箭头家族
+	arrowFineId: null,
+	arrowCurvedId: null,
+	arrowAttackId: null,
+	arrowTailedAttackId: null,
+	arrowDoubleId: null,
+	arrowSwallowtailId: null,
+	gatheringPlaceId: null,
+	// 增强线
+	lineThickId: null,
+	lineDashedId: null,
+	lineFlowId: null,
+	// 文本与图标
+	textLabelId: null,
+	textLeaderId: null,
+	iconId: null,
 };
 
 const S = {
@@ -219,6 +289,60 @@ const S = {
 	arrowStrokeWidth: 2,
 	arrowStrokeOpacity: 100,
 	arrowVisible: true,
+
+	// 军标箭头家族（共享样式）
+	miliArrowFillColor: '#f97316',
+	miliArrowFillOpacity: 70,
+	miliArrowStrokeColor: '#9a3412',
+	miliArrowStrokeOpacity: 100,
+	miliArrowVisible: true,
+
+	gatheringFillColor: '#a855f7',
+	gatheringFillOpacity: 45,
+	gatheringStrokeColor: '#6b21a8',
+	gatheringStrokeOpacity: 100,
+	gatheringVisible: true,
+
+	// 增强线
+	thickLineColor: '#0ea5e9',
+	thickLineWidth: 1500,
+	thickLineOpacity: 100,
+	thickLineVisible: true,
+
+	dashedLineColor: '#facc15',
+	dashedLineWidth: 1500,
+	dashedLineDashLength: 6000,
+	dashedLineGapLength: 4000,
+	dashedLineOpacity: 100,
+	dashedLineVisible: true,
+
+	flowLineColor: '#10b981',
+	flowLineWidth: 1500,
+	flowLineDashLength: 8000,
+	flowLineGapLength: 4000,
+	flowLineSpeed: 6000,
+	flowLineOpacity: 100,
+	flowLineVisible: true,
+
+	// 文本
+	textLabelText: '指挥所',
+	textLabelFontSize: 2400,
+	textLabelFontColor: '#f8fafc',
+	textLabelBgColor: 'rgba(15,23,42,0.75)',
+	textLabelVisible: true,
+
+	textLeaderText: '观察哨',
+	textLeaderFontSize: 2200,
+	textLeaderFontColor: '#fde68a',
+	textLeaderBgColor: 'rgba(120,53,15,0.75)',
+	textLeaderColor: '#fde68a',
+	textLeaderVisible: true,
+
+	// 图标
+	iconUrl: '../logos/cesiumion.png',
+	iconWidth: 6000,
+	iconRotation: 0,
+	iconVisible: true,
 };
 
 const _clickState = {
@@ -1094,6 +1218,22 @@ function getDemoShapeEntries() {
 		{ label: 'Sector', idKey: 'sectorId', addFn: addDemoSector, applyFn: applySector },
 		{ label: 'Circle', idKey: 'circleId', addFn: addDemoCircle, applyFn: applyCircle },
 		{ label: 'Arrow', idKey: 'arrowId', addFn: addDemoArrow, applyFn: applyArrow },
+		// 军标箭头家族
+		{ label: 'Arrow-Fine', idKey: 'arrowFineId', addFn: addDemoArrowFine, applyFn: applyArrowFine },
+		{ label: 'Arrow-Curved', idKey: 'arrowCurvedId', addFn: addDemoArrowCurved, applyFn: applyArrowCurved },
+		{ label: 'Arrow-Attack', idKey: 'arrowAttackId', addFn: addDemoArrowAttack, applyFn: applyArrowAttack },
+		{ label: 'Arrow-Tailed', idKey: 'arrowTailedAttackId', addFn: addDemoArrowTailedAttack, applyFn: applyArrowTailedAttack },
+		{ label: 'Arrow-Double', idKey: 'arrowDoubleId', addFn: addDemoArrowDouble, applyFn: applyArrowDouble },
+		{ label: 'Arrow-Swallow', idKey: 'arrowSwallowtailId', addFn: addDemoArrowSwallowtail, applyFn: applyArrowSwallowtail },
+		{ label: 'GatheringPlace', idKey: 'gatheringPlaceId', addFn: addDemoGatheringPlace, applyFn: applyGatheringPlace },
+		// 增强线
+		{ label: 'LineThick', idKey: 'lineThickId', addFn: addDemoLineThick, applyFn: applyLineThick },
+		{ label: 'LineDashed', idKey: 'lineDashedId', addFn: addDemoLineDashed, applyFn: applyLineDashed },
+		{ label: 'LineFlow', idKey: 'lineFlowId', addFn: addDemoLineFlow, applyFn: applyLineFlow },
+		// 文本与图标
+		{ label: 'TextLabel', idKey: 'textLabelId', addFn: addDemoTextLabel, applyFn: applyTextLabel },
+		{ label: 'TextLeader', idKey: 'textLeaderId', addFn: addDemoTextLeader, applyFn: applyTextLeader },
+		{ label: 'Icon', idKey: 'iconId', addFn: addDemoIcon, applyFn: applyIcon },
 	];
 
 }
@@ -1540,6 +1680,409 @@ function applyArrow() {
 
 }
 
+// ── 军标箭头家族 demo（meters，由 metricStyleToCartographicStyle 自动转换）
+
+function buildMiliArrowFillStyle( visible, opacityPercent ) {
+
+	const visibility = visible ? params.localOpacity : 0;
+	return {
+		units: 'meters',
+		fillColor: S.miliArrowFillColor,
+		fillOpacity: visibility * percent( opacityPercent ),
+		strokeColor: S.miliArrowStrokeColor,
+		strokeWidth: 2,
+		strokeOpacity: visibility * percent( S.miliArrowStrokeOpacity ),
+		opacity: visibleOpacity( visible, opacityPercent ),
+	};
+
+}
+
+function buildDemoArrowFineShape() {
+
+	return {
+		id: 'touch-ground-arrow-fine',
+		kind: 'arrow-fine',
+		coordinates: cloneSourcePoints( TOUCH_GROUND_FINE_ARROW_POINTS ),
+		style: buildMiliArrowFillStyle( S.miliArrowVisible, S.miliArrowFillOpacity ),
+	};
+
+}
+
+function buildDemoArrowCurvedShape() {
+
+	return {
+		id: 'touch-ground-arrow-curved',
+		kind: 'arrow-curved',
+		coordinates: cloneSourcePoints( TOUCH_GROUND_CURVED_POINTS ),
+		style: buildMiliArrowFillStyle( S.miliArrowVisible, S.miliArrowFillOpacity ),
+	};
+
+}
+
+function buildDemoArrowAttackShape() {
+
+	return {
+		id: 'touch-ground-arrow-attack',
+		kind: 'arrow-attack',
+		coordinates: cloneSourcePoints( TOUCH_GROUND_ATTACK_POINTS ),
+		style: buildMiliArrowFillStyle( S.miliArrowVisible, S.miliArrowFillOpacity ),
+	};
+
+}
+
+function buildDemoArrowTailedAttackShape() {
+
+	return {
+		id: 'touch-ground-arrow-tailed-attack',
+		kind: 'arrow-tailed-attack',
+		coordinates: cloneSourcePoints( TOUCH_GROUND_TAILED_POINTS ),
+		style: buildMiliArrowFillStyle( S.miliArrowVisible, S.miliArrowFillOpacity ),
+	};
+
+}
+
+function buildDemoArrowDoubleShape() {
+
+	return {
+		id: 'touch-ground-arrow-double',
+		kind: 'arrow-double',
+		coordinates: cloneSourcePoints( TOUCH_GROUND_DOUBLE_POINTS ),
+		style: buildMiliArrowFillStyle( S.miliArrowVisible, S.miliArrowFillOpacity ),
+	};
+
+}
+
+function buildDemoArrowSwallowtailShape() {
+
+	return {
+		id: 'touch-ground-arrow-swallowtail',
+		kind: 'arrow-swallowtail',
+		coordinates: [
+			[ 100.30, 22.62 ],
+			[ 100.55, 22.72 ],
+		],
+		style: buildMiliArrowFillStyle( S.miliArrowVisible, S.miliArrowFillOpacity ),
+	};
+
+}
+
+function buildDemoGatheringPlaceShape() {
+
+	const visibility = S.gatheringVisible ? params.localOpacity : 0;
+	return {
+		id: 'touch-ground-gathering',
+		kind: 'gathering-place',
+		coordinates: cloneSourcePoints( TOUCH_GROUND_GATHERING_POINTS ),
+		style: {
+			units: 'meters',
+			fillColor: S.gatheringFillColor,
+			fillOpacity: visibility * percent( S.gatheringFillOpacity ),
+			strokeColor: S.gatheringStrokeColor,
+			strokeWidth: 2,
+			strokeOpacity: visibility * percent( S.gatheringStrokeOpacity ),
+			opacity: visibleOpacity( S.gatheringVisible, S.gatheringFillOpacity ),
+		},
+	};
+
+}
+
+function buildDemoLineThickShape() {
+
+	const visibility = S.thickLineVisible ? params.localOpacity : 0;
+	return {
+		id: 'touch-ground-line-thick',
+		kind: 'line-thick',
+		coordinates: cloneSourcePoints( TOUCH_GROUND_THICK_LINE_POINTS ),
+		style: {
+			units: 'meters',
+			strokeColor: S.thickLineColor,
+			strokeWidth: S.thickLineWidth,
+			strokeOpacity: visibility * percent( S.thickLineOpacity ),
+			fillColor: '#000000',
+			boundsPadding: S.thickLineWidth,
+			opacity: visibleOpacity( S.thickLineVisible, S.thickLineOpacity ),
+		},
+	};
+
+}
+
+function buildDemoLineDashedShape() {
+
+	const visibility = S.dashedLineVisible ? params.localOpacity : 0;
+	return {
+		id: 'touch-ground-line-dashed',
+		kind: 'line-dashed',
+		coordinates: cloneSourcePoints( TOUCH_GROUND_DASHED_LINE_POINTS ),
+		style: {
+			units: 'meters',
+			strokeColor: S.dashedLineColor,
+			strokeWidth: S.dashedLineWidth,
+			strokeOpacity: visibility * percent( S.dashedLineOpacity ),
+			fillColor: '#000000',
+			dashLength: S.dashedLineDashLength,
+			gapLength: S.dashedLineGapLength,
+			boundsPadding: S.dashedLineWidth,
+			opacity: visibleOpacity( S.dashedLineVisible, S.dashedLineOpacity ),
+		},
+	};
+
+}
+
+function buildDemoLineFlowShape() {
+
+	const visibility = S.flowLineVisible ? params.localOpacity : 0;
+	return {
+		id: 'touch-ground-line-flow',
+		kind: 'line-flow',
+		coordinates: cloneSourcePoints( TOUCH_GROUND_FLOW_LINE_POINTS ),
+		style: {
+			units: 'meters',
+			strokeColor: S.flowLineColor,
+			strokeWidth: S.flowLineWidth,
+			strokeOpacity: visibility * percent( S.flowLineOpacity ),
+			fillColor: '#000000',
+			dashLength: S.flowLineDashLength,
+			gapLength: S.flowLineGapLength,
+			flowSpeed: S.flowLineSpeed,
+			boundsPadding: S.flowLineWidth,
+			opacity: visibleOpacity( S.flowLineVisible, S.flowLineOpacity ),
+		},
+	};
+
+}
+
+function buildDemoTextLabelShape() {
+
+	return {
+		id: 'touch-ground-text-label',
+		kind: 'text-label',
+		coordinates: [ [ ...TOUCH_GROUND_TEXT_LABEL_POINT ] ],
+		style: {
+			units: 'meters',
+			text: S.textLabelText,
+			fontSize: S.textLabelFontSize,
+			fontFamily: 'sans-serif',
+			fontColor: S.textLabelFontColor,
+			bgColor: S.textLabelBgColor,
+			width: S.textLabelFontSize * 6,
+			height: S.textLabelFontSize * 1.4,
+			fillColor: '#000000',
+			strokeColor: '#ffffff',
+			strokeWidth: 0,
+			fillOpacity: S.textLabelVisible ? 1 : 0,
+			strokeOpacity: 0,
+			opacity: S.textLabelVisible ? params.localOpacity : 0,
+		},
+	};
+
+}
+
+function buildDemoTextLeaderShape() {
+
+	return {
+		id: 'touch-ground-text-leader',
+		kind: 'text-leader',
+		coordinates: [ [ ...TOUCH_GROUND_TEXT_LEADER_ANCHOR ] ],
+		style: {
+			units: 'meters',
+			text: S.textLeaderText,
+			fontSize: S.textLeaderFontSize,
+			fontFamily: 'sans-serif',
+			fontColor: S.textLeaderFontColor,
+			bgColor: S.textLeaderBgColor,
+			leaderTo: [ ...TOUCH_GROUND_TEXT_LEADER_TARGET ],
+			leaderColor: S.textLeaderColor,
+			leaderWidth: 600,
+			width: S.textLeaderFontSize * 6,
+			height: S.textLeaderFontSize * 1.4,
+			fillColor: '#000000',
+			strokeColor: '#ffffff',
+			strokeWidth: 0,
+			fillOpacity: S.textLeaderVisible ? 1 : 0,
+			strokeOpacity: 0,
+			opacity: S.textLeaderVisible ? params.localOpacity : 0,
+		},
+	};
+
+}
+
+function buildDemoIconShape() {
+
+	return {
+		id: 'touch-ground-icon',
+		kind: 'icon',
+		coordinates: [ [ ...TOUCH_GROUND_ICON_POINT ] ],
+		style: {
+			units: 'meters',
+			icon: S.iconUrl,
+			width: S.iconWidth,
+			height: S.iconWidth,
+			rotation: S.iconRotation * MathUtils.DEG2RAD,
+			fillColor: '#000000',
+			strokeColor: '#000000',
+			strokeWidth: 0,
+			opacity: S.iconVisible ? params.localOpacity : 0,
+		},
+	};
+
+}
+
+function addDemoArrowFine( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoArrowFineShape(), shouldInvalidate );
+
+}
+
+function addDemoArrowCurved( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoArrowCurvedShape(), shouldInvalidate );
+
+}
+
+function addDemoArrowAttack( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoArrowAttackShape(), shouldInvalidate );
+
+}
+
+function addDemoArrowTailedAttack( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoArrowTailedAttackShape(), shouldInvalidate );
+
+}
+
+function addDemoArrowDouble( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoArrowDoubleShape(), shouldInvalidate );
+
+}
+
+function addDemoArrowSwallowtail( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoArrowSwallowtailShape(), shouldInvalidate );
+
+}
+
+function addDemoGatheringPlace( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoGatheringPlaceShape(), shouldInvalidate );
+
+}
+
+function addDemoLineThick( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoLineThickShape(), shouldInvalidate );
+
+}
+
+function addDemoLineDashed( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoLineDashedShape(), shouldInvalidate );
+
+}
+
+function addDemoLineFlow( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoLineFlowShape(), shouldInvalidate );
+
+}
+
+function addDemoTextLabel( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoTextLabelShape(), shouldInvalidate );
+
+}
+
+function addDemoTextLeader( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoTextLeaderShape(), shouldInvalidate );
+
+}
+
+function addDemoIcon( shouldInvalidate = true ) {
+
+	return addDemoShape( buildDemoIconShape(), shouldInvalidate );
+
+}
+
+function applyArrowFine() {
+
+	updateDemoShapeStyle( 'arrowFineId', buildDemoArrowFineShape() );
+
+}
+
+function applyArrowCurved() {
+
+	updateDemoShapeStyle( 'arrowCurvedId', buildDemoArrowCurvedShape() );
+
+}
+
+function applyArrowAttack() {
+
+	updateDemoShapeStyle( 'arrowAttackId', buildDemoArrowAttackShape() );
+
+}
+
+function applyArrowTailedAttack() {
+
+	updateDemoShapeStyle( 'arrowTailedAttackId', buildDemoArrowTailedAttackShape() );
+
+}
+
+function applyArrowDouble() {
+
+	updateDemoShapeStyle( 'arrowDoubleId', buildDemoArrowDoubleShape() );
+
+}
+
+function applyArrowSwallowtail() {
+
+	updateDemoShapeStyle( 'arrowSwallowtailId', buildDemoArrowSwallowtailShape() );
+
+}
+
+function applyGatheringPlace() {
+
+	updateDemoShapeStyle( 'gatheringPlaceId', buildDemoGatheringPlaceShape() );
+
+}
+
+function applyLineThick() {
+
+	updateDemoShapeStyle( 'lineThickId', buildDemoLineThickShape() );
+
+}
+
+function applyLineDashed() {
+
+	updateDemoShapeStyle( 'lineDashedId', buildDemoLineDashedShape() );
+
+}
+
+function applyLineFlow() {
+
+	updateDemoShapeStyle( 'lineFlowId', buildDemoLineFlowShape() );
+
+}
+
+function applyTextLabel() {
+
+	updateDemoShapeStyle( 'textLabelId', buildDemoTextLabelShape() );
+
+}
+
+function applyTextLeader() {
+
+	updateDemoShapeStyle( 'textLeaderId', buildDemoTextLeaderShape() );
+
+}
+
+function applyIcon() {
+
+	updateDemoShapeStyle( 'iconId', buildDemoIconShape() );
+
+}
+
 function applyAllDemoStyles() {
 
 	for ( const entry of getDemoShapeEntries() ) entry.applyFn();
@@ -1669,7 +2212,13 @@ function metricStyleToCartographicStyle( shape ) {
 	if ( style.units !== 'meters' ) return style;
 
 	const lat = getShapeReferenceLatDeg( shape );
-	for ( const key of [ 'size', 'strokeWidth', 'boundsPadding', 'radius', 'width', 'headLength' ] ) {
+	const lonKeys = [
+		'size', 'strokeWidth', 'boundsPadding', 'radius', 'width',
+		'headLength', 'tailWidth', 'maxHeadHeight',
+		'dashLength', 'gapLength', 'flowSpeed',
+		'fontSize', 'leaderWidth',
+	];
+	for ( const key of lonKeys ) {
 
 		if ( Number.isFinite( Number( style[ key ] ) ) ) style[ key ] = metersToLonDegrees( style[ key ], lat );
 
@@ -1703,6 +2252,11 @@ function cartographicDemoStyleToWorldStyle( shape ) {
 	if ( Number.isFinite( style.headLength ) ) style.headLength *= metersPerDegreeLon;
 	if ( Number.isFinite( style.radius ) ) style.radius *= metersPerDegreeLon;
 	if ( Number.isFinite( style.size ) ) style.size *= metersPerDegreeLon;
+	if ( Number.isFinite( style.dashLength ) ) style.dashLength *= metersPerDegreeLon;
+	if ( Number.isFinite( style.gapLength ) ) style.gapLength *= metersPerDegreeLon;
+	if ( Number.isFinite( style.flowSpeed ) ) style.flowSpeed *= metersPerDegreeLon;
+	if ( Number.isFinite( style.fontSize ) ) style.fontSize *= metersPerDegreeLon;
+	if ( Number.isFinite( style.leaderWidth ) ) style.leaderWidth *= metersPerDegreeLon;
 	if ( Number.isFinite( style.strokeWidth ) && style.strokeWidth <= 1 ) {
 
 		style.strokeWidth = Math.max( style.strokeWidth * Math.min( metersPerDegreeLon, METERS_PER_DEG_LAT ), 2 );
@@ -1915,6 +2469,76 @@ function setupGui() {
 	addStrokeControls( arF, 'arrow', applyArrow );
 	addVisibleToggle( arF, 'arrow', applyArrow );
 
+	// 军标箭头（共享样式）
+	const miliFolder = gui.addFolder( 'Military Arrows' );
+	const miliApply = () => {
+
+		applyArrowFine();
+		applyArrowCurved();
+		applyArrowAttack();
+		applyArrowTailedAttack();
+		applyArrowDouble();
+		applyArrowSwallowtail();
+
+	};
+
+	miliFolder.addColor( S, 'miliArrowFillColor' ).name( 'Fill' ).onChange( miliApply );
+	miliFolder.add( S, 'miliArrowFillOpacity', 0, 100, 1 ).name( 'Fill Opacity' ).onChange( miliApply );
+	miliFolder.addColor( S, 'miliArrowStrokeColor' ).name( 'Stroke' ).onChange( miliApply );
+	miliFolder.add( S, 'miliArrowStrokeOpacity', 0, 100, 1 ).name( 'Stroke Opacity' ).onChange( miliApply );
+	miliFolder.add( S, 'miliArrowVisible' ).name( 'Visible' ).onChange( miliApply );
+
+	const gpF = gui.addFolder( 'Gathering Place' );
+	gpF.addColor( S, 'gatheringFillColor' ).name( 'Fill' ).onChange( applyGatheringPlace );
+	gpF.add( S, 'gatheringFillOpacity', 0, 100, 1 ).name( 'Fill Opacity' ).onChange( applyGatheringPlace );
+	gpF.addColor( S, 'gatheringStrokeColor' ).name( 'Stroke' ).onChange( applyGatheringPlace );
+	gpF.add( S, 'gatheringStrokeOpacity', 0, 100, 1 ).name( 'Stroke Opacity' ).onChange( applyGatheringPlace );
+	gpF.add( S, 'gatheringVisible' ).name( 'Visible' ).onChange( applyGatheringPlace );
+
+	// 厚线 / 虚线 / 流光线
+	const tlF = gui.addFolder( 'Line - Thick' );
+	tlF.addColor( S, 'thickLineColor' ).name( 'Color' ).onChange( applyLineThick );
+	tlF.add( S, 'thickLineWidth', 100, 8000, 100 ).name( 'Width (m)' ).onChange( applyLineThick );
+	tlF.add( S, 'thickLineOpacity', 0, 100, 1 ).name( 'Opacity' ).onChange( applyLineThick );
+	tlF.add( S, 'thickLineVisible' ).name( 'Visible' ).onChange( applyLineThick );
+
+	const dlF = gui.addFolder( 'Line - Dashed' );
+	dlF.addColor( S, 'dashedLineColor' ).name( 'Color' ).onChange( applyLineDashed );
+	dlF.add( S, 'dashedLineWidth', 100, 8000, 100 ).name( 'Width (m)' ).onChange( applyLineDashed );
+	dlF.add( S, 'dashedLineDashLength', 500, 30000, 500 ).name( 'Dash (m)' ).onChange( applyLineDashed );
+	dlF.add( S, 'dashedLineGapLength', 500, 30000, 500 ).name( 'Gap (m)' ).onChange( applyLineDashed );
+	dlF.add( S, 'dashedLineOpacity', 0, 100, 1 ).name( 'Opacity' ).onChange( applyLineDashed );
+	dlF.add( S, 'dashedLineVisible' ).name( 'Visible' ).onChange( applyLineDashed );
+
+	const flF = gui.addFolder( 'Line - Flow' );
+	flF.addColor( S, 'flowLineColor' ).name( 'Color' ).onChange( applyLineFlow );
+	flF.add( S, 'flowLineWidth', 100, 8000, 100 ).name( 'Width (m)' ).onChange( applyLineFlow );
+	flF.add( S, 'flowLineDashLength', 500, 30000, 500 ).name( 'Dash (m)' ).onChange( applyLineFlow );
+	flF.add( S, 'flowLineGapLength', 500, 30000, 500 ).name( 'Gap (m)' ).onChange( applyLineFlow );
+	flF.add( S, 'flowLineSpeed', 0, 30000, 100 ).name( 'Flow Speed (m/s)' ).onChange( applyLineFlow );
+	flF.add( S, 'flowLineOpacity', 0, 100, 1 ).name( 'Opacity' ).onChange( applyLineFlow );
+	flF.add( S, 'flowLineVisible' ).name( 'Visible' ).onChange( applyLineFlow );
+
+	// 文本
+	const tlblF = gui.addFolder( 'Text - Label' );
+	tlblF.add( S, 'textLabelText' ).name( 'Text' ).onChange( applyTextLabel );
+	tlblF.add( S, 'textLabelFontSize', 600, 8000, 100 ).name( 'Font (m)' ).onChange( applyTextLabel );
+	tlblF.addColor( S, 'textLabelFontColor' ).name( 'Font color' ).onChange( applyTextLabel );
+	tlblF.add( S, 'textLabelVisible' ).name( 'Visible' ).onChange( applyTextLabel );
+
+	const tldF = gui.addFolder( 'Text - Leader' );
+	tldF.add( S, 'textLeaderText' ).name( 'Text' ).onChange( applyTextLeader );
+	tldF.add( S, 'textLeaderFontSize', 600, 8000, 100 ).name( 'Font (m)' ).onChange( applyTextLeader );
+	tldF.addColor( S, 'textLeaderFontColor' ).name( 'Font color' ).onChange( applyTextLeader );
+	tldF.add( S, 'textLeaderVisible' ).name( 'Visible' ).onChange( applyTextLeader );
+
+	// 图标
+	const icF = gui.addFolder( 'Icon' );
+	icF.add( S, 'iconUrl' ).name( 'URL' ).onChange( applyIcon );
+	icF.add( S, 'iconWidth', 500, 30000, 100 ).name( 'Width (m)' ).onChange( applyIcon );
+	icF.add( S, 'iconRotation', - 180, 180, 1 ).name( 'Rotation (°)' ).onChange( applyIcon );
+	icF.add( S, 'iconVisible' ).name( 'Visible' ).onChange( applyIcon );
+
 	const deleteFolder = gui.addFolder( 'Delete & Re-add' );
 	const folderByIdKey = {
 		pointId: [ ptF ],
@@ -1925,6 +2549,19 @@ function setupGui() {
 		sectorId: [ scF ],
 		circleId: [ ciF ],
 		arrowId: [ arF ],
+		arrowFineId: [ miliFolder ],
+		arrowCurvedId: [ miliFolder ],
+		arrowAttackId: [ miliFolder ],
+		arrowTailedAttackId: [ miliFolder ],
+		arrowDoubleId: [ miliFolder ],
+		arrowSwallowtailId: [ miliFolder ],
+		gatheringPlaceId: [ gpF ],
+		lineThickId: [ tlF ],
+		lineDashedId: [ dlF ],
+		lineFlowId: [ flF ],
+		textLabelId: [ tlblF ],
+		textLeaderId: [ tldF ],
+		iconId: [ icF ],
 	};
 
 	for ( const entry of getDemoShapeEntries() ) {

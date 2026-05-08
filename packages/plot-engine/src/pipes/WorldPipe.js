@@ -4,6 +4,7 @@ import {
 	disposeObjectTree,
 	PrimitiveMaterialPool,
 } from './primitiveFactory.js';
+import { ThickLineMaterialPool } from './ThickLineMaterial.js';
 
 export class WorldPipe {
 
@@ -12,6 +13,7 @@ export class WorldPipe {
 		this.group = new Group();
 		this.group.name = 'PlotEngine.WorldPipe';
 		this._materialPool = new PrimitiveMaterialPool();
+		this._thickLineMaterialPool = new ThickLineMaterialPool();
 
 	}
 
@@ -27,6 +29,7 @@ export class WorldPipe {
 
 		const batchedGroup = createBatchedPrimitiveGroup( compiledShapes, {
 			materialPool: this._materialPool,
+			thickLineMaterialPool: this._thickLineMaterialPool,
 		} );
 		while ( batchedGroup.children.length > 0 ) {
 
@@ -41,6 +44,7 @@ export class WorldPipe {
 
 		this.refresh( [] );
 		this._materialPool.dispose();
+		this._thickLineMaterialPool.dispose();
 
 	}
 

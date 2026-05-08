@@ -262,6 +262,15 @@ function compileSector( shape ) {
 
 }
 
+function compileThickLine( shape ) {
+
+	const compiled = compileLine( shape );
+	if ( ! compiled ) return null;
+	compiled.kind = shape.kind;
+	return compiled;
+
+}
+
 function compileArrow( shape ) {
 
 	const coordinates = shape.coordinates || [];
@@ -312,6 +321,9 @@ export function registerDefaultCompilers( registry ) {
 	registry.register( 'circle', compileCircle );
 	registry.register( 'sector', compileSector );
 	registry.register( 'arrow', compileArrow );
+	registry.register( 'line-thick', compileThickLine );
+	registry.register( 'line-dashed', compileThickLine );
+	registry.register( 'line-flow', compileThickLine );
 	return registry;
 
 }
